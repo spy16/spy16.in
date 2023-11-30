@@ -1,0 +1,59 @@
+---
+import MdiHome from "~icons/mdi/home";
+import MdiCrane from "~icons/mdi/crane";
+import MdiHeadLightbulb from "~icons/mdi/head-lightbulb";
+
+const links = [
+    {
+        label: "Home",
+        href: "/",
+        Icon: MdiHome,
+    },
+    {
+        label: "Projects",
+        href: "/projects",
+        Icon: MdiCrane,
+    },
+    {
+        label: "Posts",
+        href: "/posts",
+        Icon: MdiHeadLightbulb,
+    },
+];
+
+const isActive = (href: string) => {
+    const curRoute = Astro.url.pathname || "/";
+    return (
+        (href !== "/" && curRoute.startsWith(href)) ||
+        (href === "/" && curRoute === href)
+    );
+};
+---
+
+<header
+    class="w-full max-w-3xl mx-auto flex flex-row items-center gap-4 justify-center p-2"
+>
+    <slot name="left" />
+
+    <div class="ml-8 tabs tabs-boxed">
+        {
+            links.map((lnk) => {
+                const activeLink = isActive(lnk.href);
+                return (
+                    <a
+                        href={lnk.href}
+                        class={
+                            "inline-flex items-center gap-1 tab " +
+                            (activeLink ? "tab-active" : "")
+                        }
+                    >
+                        <lnk.Icon class="text-xl" />
+                        <span class="hidden md:inline-block">{lnk.label}</span>
+                    </a>
+                );
+            })
+        }
+    </div>
+
+    <slot name="right" />
+</header>

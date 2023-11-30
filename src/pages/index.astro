@@ -1,0 +1,111 @@
+---
+import Companies from "../components/Companies.astro";
+import { AVATAR, EXPERIENCE, SKILLS, SOCIALS, WORK } from "../consts";
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout>
+	<main>
+		<div class="flex flex-col gap-2 max-w-2xl items-center p-8 mx-auto">
+			<section class="w-full">
+				<div class="flex flex-col items-center gap-4">
+					<img
+						src={AVATAR}
+						alt="shivaprasad bhat"
+						class="rounded-full w-16 h-auto md:w-24"
+					/>
+					<h1 class="text-3xl font-bold text-base-content">
+						Hi, I am Prasad.
+					</h1>
+
+					<ul class="flex flex-row items-center gap-3">
+						{
+							SOCIALS.map((social) => (
+								<li class="flex flex-row items-center gap-1 hover:rotate-12 duration-100 transition-all">
+									<a
+										target="_blank"
+										rel="external"
+										class={`link text-2xl ${social.css}`}
+										href={social.url}
+									>
+										<social.Icon />
+									</a>
+								</li>
+							))
+						}
+					</ul>
+
+					<p class="text-center">
+						I am a software engineer with ~{EXPERIENCE} years of
+						professional experience, but my ❤️ for coding started in
+						2009 (when i was in 9th standard).
+					</p>
+				</div>
+			</section>
+
+			<section class="w-full">
+				<div class="divider">Technologies I use</div>
+				<div class="w-full flex flex-col items-center gap-2">
+					<ul class="flex flex-row items-center gap-3 mt-2">
+						{
+							Object.entries(SKILLS).map(([_, v]) => {
+								return (
+									<li class="flex flex-row items-center gap-1 text-3xl hover:-translate-y-1 duration-100 transition-all">
+										<a
+											href={v.href}
+											target="_blank"
+											rel="external"
+										>
+											<v.Icon class="bg-slate-200 p-1 rounded-lg" />
+										</a>
+									</li>
+								);
+							})
+						}
+					</ul>
+				</div>
+			</section>
+
+			<section class="w-full">
+				<div class="divider">Work Experience</div>
+				<div class="w-full flex flex-col gap-2 items-center">
+					<p>I have built tech for the following companies.</p>
+
+					<ul class="w-full flex flex-col gap-2 my-2">
+						{
+							WORK.map((job) => (
+								<li>
+									<a
+										class="flex flex-row items-center gap-4 p-2 rounded-md hover:bg-base-300 px-4"
+										href={job.href}
+										target={
+											job.external ? "_blank" : "_self"
+										}
+									>
+										<img
+											src={job.logo}
+											alt={job.company}
+											class="w-10 h-auto"
+										/>
+										<div class="flex flex-col">
+											<span class="font-bold">
+												{job.company}
+											</span>
+
+											<div class="flex flex-row items-center gap-2">
+												<span>{job.role}</span>
+												<span class="text-sm">
+													({job.duration})
+												</span>
+											</div>
+										</div>
+									</a>
+								</li>
+							))
+						}
+					</ul>
+				</div>
+			</section>
+		</div>
+	</main>
+</Layout>
