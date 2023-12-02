@@ -21,6 +21,8 @@ You might have noticed this pattern in some Go codebases (e.g., in your org):
 ```go
 package redis
 
+// ------ DO NOT DO THIS ------
+
 type Client interface {
   Get(key string) (string, error)
 }

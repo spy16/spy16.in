@@ -10,7 +10,7 @@ export default {
 				twitter: '#1DA1F2',
 			},
 			fontFamily: {
-				sans: ["Chilanka"],
+				// sans: ["Chilanka"],
 			}
 		},
 	},

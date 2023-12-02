@@ -19,8 +19,8 @@ const description = props.description || "Poor attempts to convey my thoughts";
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const siteImageUrl = new URL("/logo.png", Astro.site);
 
-// wireframe
-const curTheme = "wireframe"; // cupcake when it's day.
+// wireframe, cupcake
+const curTheme = "emerald"; // cupcake when it's day.
 ---
 
 <!doctype html>
@@ -82,7 +82,7 @@ const curTheme = "wireframe"; // cupcake when it's day.
 			>
 				{!props.noHeader && <Header />}
 
-				<div transition:animate="slide">
+				<div transition:animate="slide" class="my-12">
 					<slot />
 				</div>
 			</div>
