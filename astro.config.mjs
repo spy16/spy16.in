@@ -3,8 +3,9 @@ import mdx from '@astrojs/mdx';
 import sitemap from '@astrojs/sitemap';
 import Icons from 'unplugin-icons/vite';
 import tailwind from "@astrojs/tailwind";
-
 import prefetch from "@astrojs/prefetch";
+
+import cloudflare from "@astrojs/cloudflare";
 
 // https://astro.build/config
 export default defineConfig({
@@ -26,5 +27,7 @@ export default defineConfig({
       wrap: false,
       theme: "rose-pine-dawn"
     }
-  }
+  },
+  output: "hybrid",
+  adapter: cloudflare()
 });
