@@ -1,7 +1,7 @@
 ---
 title: "Context Cancellation in Go"
-pubDate: 2023-11-11T23:03:59+05:30
-publish: false
+pubDate: 2023-12-05
+publish: true
 description: |
     This article explores different cancellation patterns that can be achieved using contexts.
 tags: [golang, patterns, practices]
@@ -10,11 +10,11 @@ no_toc: false
 
 One of the most important use-cases of context in Go is propagating/handling cancellation. Cancellation is the process of terminating or stopping the execution of a task or operation. With context, we can propagate cancellation signals across API boundaries and between goroutines to gracefully stop the execution of a task when it is no longer needed or when an error occurs.
 
-Context cancellation is a mechanism usually used to **inform your goroutines in concurrent-safe way that their shutdown is imminent, allowing them to safely save or discard their work.**
+Context cancellation is a mechanism usually used to **inform goroutines in concurrent-safe way that they need to save or discard their work and safely exit.**
 
 It's important to note that the context is not inherently tied to the runtime, and passing a context to a goroutine does not automatically make it stoppable. The function running in the goroutine needs to explicitly check the context at appropriate points and make the decision to exit.
 
-We can make any context value cancellable using different ways:
+We can make any context value "cancellable" using different ways:
 
 ```go
 // Manual: Cancel manually by calling the `cancel` func returned.
@@ -104,7 +104,7 @@ func computeHandler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-In this scenario, we want to send user input from a mobile app to the server, perform a computation, and then send the result back to the client. However, there are cases where the user may close the app or the request may be dropped due to a network issue. In such situations, it is unnecessary to complete the computation and send the result back, as the client is no longer interested in receiving it. We could potentially save a lot of unnecessary work by using context here.
+In this scenario, we want to send user input from a mobile app to the server, perform a computation, and then send the result back to the client. However, there are cases where the user may close the app or the request may be dropped due to a network issue. In such situations, it is unnecessary to complete the computation and send the result back, as the client is no longer there to receive it. We could potentially save a lot of unnecessary work by using context here.
 
 Let's say we refactored our `veryExpensiveComputation` to accept and use a context, we can pass it `r.Context()` to ensure it receives a cancellation when the request ends.
 
@@ -117,6 +117,27 @@ func computeHandler(w http.ResponseWriter, r *http.Request) {
     // ...
 }
 ```
+
+Just passing the context is not enough of course. In our `veryExpensiveComputation` function, we should ensure we check context cancellation at various stages of our compute logic to see if the client has cancelled the request. For example, if this function has a for loop to process a large array, we could do something like this:
+
+```go
+func veryExpensiveComputation(ctx context.Context, params Params) (*Result, bool) {
+    var result Result
+    for i := 0; i < params.Iterations; i++ {
+        select {
+            case <-ctx.Done():
+                return nil, false
+
+            default:
+                // do some number crunching and push it into `result`
+        }
+    }
+
+    return &result, true // successfully completed.
+}
+```
+
+This way, if user cancels the request when we have only processed 10 iterations out of 100,000 required, we will avoid doing the remaining 99,990 iterations.
 
 ## Graceful Shutdown
 
@@ -173,3 +194,7 @@ func main() {
 ```
 
 The same `ctx` value can be passed to database drivers, gRPC server instances, worker goroutines, etc. to signal a graceful shutdown across the whole system. 
+
+## Conclusion
+
+As we have seen, contexts are really powerful primitives provided by Go, which when used correctly helps us build very  efficient systems in Go. In addition to the different use-cases I have detailed above, more can be built on these basic ideas of context usage.

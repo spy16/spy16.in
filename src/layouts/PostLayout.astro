@@ -1,0 +1,40 @@
+---
+import { type CollectionEntry } from "astro:content";
+
+import Layout from "./Layout.astro";
+
+type Props = CollectionEntry<"blog">;
+
+const post = Astro.props;
+const { title, description, pubDate, tags } = post.data;
+---
+
+<Layout title={title} description={description}>
+    <main class="w-full max-w-screen-md mx-auto flex flex-col">
+        <header class="flex flex-col gap-4 items-center">
+            <h1 class="text-2xl font-bold tracking-wide">{title}</h1>
+            <p class="text-sm">
+                Published on <span class="font-medium"
+                    >{pubDate.toDateString()}</span
+                >
+            </p>
+
+            <ul class="flex flex-row gap-1 flex-wrap">
+                {
+                    tags &&
+                        tags.map((tag) => (
+                            <li class="badge badge-info badge-sm">{tag}</li>
+                        ))
+                }
+            </ul>
+        </header>
+
+        <article
+            class="mt-12 max-w-none prose dark:prose-invert
+		prose-h1:font-bold prose-h1:text-xl prose-lg
+		prose-a:text-blue-600 prose-p:text-justify prose-img:rounded-xl prose-img:mx-auto prose-img:border prose-img:p-4"
+        >
+            <slot />
+        </article>
+    </main>
+</Layout>

@@ -11,7 +11,26 @@ export default {
 			},
 			fontFamily: {
 				// sans: ["Chilanka"],
-			}
+			},
+			typography(theme) {
+				return {
+					DEFAULT: {
+						css: {
+							'code::before': {
+								content: 'none',
+							},
+							'code::after': {
+								content: 'none'
+							},
+							code: {
+								fontWeight: '400',
+								padding: '1px 4px',
+								backgroundColor: theme('colors.gray.200'),
+							},
+						}
+					}
+				}
+			},
 		},
 	},
 	plugins: [
