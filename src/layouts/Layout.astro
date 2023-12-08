@@ -87,5 +87,16 @@ const curTheme = "lofi"; // cupcake when it's day.
 				</div>
 			</div>
 		</div>
+
+		<script>
+			import { isLoading } from "../components/states";
+
+			document.addEventListener("astro:before-preparation", () => {
+				isLoading.set(true);
+			});
+			document.addEventListener("astro:page-load", () => {
+				isLoading.set(false);
+			});
+		</script>
 	</body>
 </html>

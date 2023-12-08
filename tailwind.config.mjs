@@ -4,13 +4,11 @@ export default {
 	theme: {
 		extend: {
 			colors: {
+				gmail: "#D44638",
 				instagram: '#E1306C',
 				github: '#0D1117',
 				linkedin: '#2867B2',
 				twitter: '#1DA1F2',
-			},
-			fontFamily: {
-				// sans: ["Chilanka"],
 			},
 			typography(theme) {
 				return {
@@ -38,6 +36,6 @@ export default {
 		require('@tailwindcss/typography'),
 	],
 	daisyui: {
-		themes: true,
+		themes: ["lofi"],
 	}
 }

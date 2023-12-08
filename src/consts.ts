@@ -5,6 +5,7 @@ import MdiGithub from "~icons/mdi/github";
 import MdiTwitter from "~icons/mdi/twitter";
 import MdiLinkedin from "~icons/mdi/linkedin";
 import MdiInstagram from "~icons/mdi/instagram";
+import MdiGmail from '~icons/mdi/gmail';
 
 import DeviconRedis from '~icons/devicon/redis';
 import DeviconSvelte from '~icons/devicon/svelte';
@@ -14,19 +15,27 @@ import DeviconGoWordmark from '~icons/devicon/go-wordmark'
 import DeviconApachekafka from '~icons/devicon/apachekafka';
 import DeviconSupabase from '~icons/devicon/supabase'
 
+import aarityaLogo from "./assets/company.png";
+import gojekLogo from "./assets/gojek.svg";
+import docutalkLogo from "./assets/docutalk.png";
+import directiLogo from "./assets/directi.png";
+
 export const SITE_TITLE = 'spy16.in';
 export const SITE_DESCRIPTION = 'Welcome!';
-
 export const TWITTER_HANDLE = '@spy16x';
 
-
 export const AVATAR = gravatar.url("shiv.ylp@gmail.com", {
-	size: "512",
+    size: "512",
 });
 
 export const EXPERIENCE = differenceInYears(new Date(), new Date(2016, 6, 16));
 
 export const SOCIALS = [
+    {
+        css: "hover:text-gmail",
+        url: "mailto:shiv.ylp@gmail.com",
+        Icon: MdiGmail,
+    },
     {
         css: "",
         url: "https://github.com/spy16",
@@ -54,7 +63,7 @@ export const WORK = [
         company: 'Aaritya',
         role: 'Software Engineer',
         duration: 'Nov 2023 - Present',
-        logo: '/company.png',
+        logo: aarityaLogo,
         href: 'https://aaritya.com',
         external: true
     },
@@ -62,7 +71,7 @@ export const WORK = [
         company: 'GoJek',
         role: 'Product Engineer',
         duration: 'Jul 2018 - Nov 2023',
-        logo: '/gojek.svg',
+        logo: gojekLogo,
         href: 'https://gojek.com',
         external: true
     },
@@ -70,14 +79,14 @@ export const WORK = [
         company: 'DocuTalk (Acquired)',
         role: 'Founder',
         duration: 'Feb 2023 - Aug 2023',
-        logo: '/docutalk.png',
+        logo: docutalkLogo,
         href: '/projects/docutalk'
     },
     {
         company: 'Directi',
         role: 'Software Engineer',
         duration: 'Jul 2016 - Jul 2018',
-        logo: '/directi.png',
+        logo: directiLogo,
         href: 'https://directi.com',
         external: true
     }
