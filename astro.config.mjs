@@ -9,7 +9,8 @@ import cloudflare from "@astrojs/cloudflare";
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://example.com',
+  site: 'https://spy16.in',
+  prefetch: true,
   integrations: [mdx(), sitemap(), tailwind(), prefetch()],
   image: {
     service: passthroughImageService()
