@@ -20,16 +20,9 @@ type Counters struct {
 
 func main() {
 	counts := Counters{}
-	go reportCounts(&counts)
+	go runIncrLoop(&counts.c1)
+	go runIncrLoop(&counts.c2)
 
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	go runIncrLoop(&wg, &counts.c1)
-	go runIncrLoop(&wg, &counts.c2)
-	wg.Wait()
-}
-
-func reportCounts(counts *Counters) {
 	// We print no. of updates to both counters every
 	// second and reset the counters to 0.
 	for range time.Tick(1 * time.Second) {
@@ -37,8 +30,7 @@ func reportCounts(counts *Counters) {
 	}
 }
 
-func runIncrLoop(wg *sync.WaitGroup, c *int64) {
-	defer wg.Done()
+func runIncrLoop(c *int64) {
 	for {
 		atomic.AddInt64(c, 1)
 	}
