@@ -1,5 +1,5 @@
 ---
-title: "Accept Interfaces - Return Structs, Please!!"
+title: "Accept Interfaces - Return Structs."
 pubDate: 2023-11-11T23:03:59+05:30
 publish: false
 description: |
