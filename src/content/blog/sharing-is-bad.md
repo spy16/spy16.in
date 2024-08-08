@@ -3,7 +3,7 @@ title: "When sharing is bad"
 pubDate: 2024-08-07T11:03:59+05:30
 publish: true
 description: |
-  A small experiment on effects of cacheline false-sharing in highly concurrent systems.
+  A small experiment on effects of cacheline false-sharing in multi-processor systems.
 tags: [perf, optimization, golang]
 no_toc: false
 ---
