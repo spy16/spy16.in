@@ -6,88 +6,96 @@ import { getCollection, type CollectionEntry } from "astro:content";
 import Layout from "../../layouts/Layout.astro";
 
 export const getStaticPaths: GetStaticPaths = async ({ paginate }) => {
-	const posts = (await getCollection("blog"))
-		.filter((p) => {
-			if (import.meta.env.PROD) return !!p.data.publish;
-			return true;
-		})
-		.sort((a, b) => (isBefore(a.data.pubDate, b.data.pubDate) ? 1 : -1));
+    const posts = (await getCollection("blog"))
+        .filter((p) => {
+            if (import.meta.env.PROD) return !!p.data.publish;
+            return true;
+        })
+        .sort((a, b) => (isBefore(a.data.pubDate, b.data.pubDate) ? 1 : -1));
 
-	return paginate(posts, { pageSize: 5 });
+    return paginate(posts, { pageSize: 5 });
 };
 
 const page = Astro.props.page as Page<CollectionEntry<"blog">>;
 ---
 
 <Layout title="Blog Posts">
-	<main
-		class="flex flex-col gap-6 items-center w-full max-w-screen-md mx-auto px-2"
-	>
-		<h1 class="text-xl font-bold">Blog Posts</h1>
-		<ul class="flex flex-col gap-8">
-			{
-				page.data.map((b) => (
-					<li class="w-full flex flex-row gap-4 items-center">
-						<div class="flex flex-col gap-1 items-center p-4 border rounded-md bg-white">
-							<span class="text-3xl font-extrabold">
-								{b.data.pubDate.getDate()}
-							</span>
-							<span class="text-sm">
-								{b.data.pubDate.toLocaleString("default", {
-									year: "numeric",
-									month: "short",
-								})}
-							</span>
-						</div>
+    <main
+        class="flex flex-col gap-6 items-center w-full max-w-screen-md mx-auto px-2"
+    >
+        <h1 class="text-xl font-bold">Blog Posts</h1>
+        <ul class="flex flex-col gap-8">
+            {
+                page.data.map((b) => (
+                    <li class="w-full flex flex-row gap-4 items-center">
+                        <div class="flex flex-col gap-1 items-center p-4 border rounded-md bg-white">
+                            <span class="text-3xl font-extrabold">
+                                {b.data.pubDate.getDate()}
+                            </span>
+                            <span class="text-sm">
+                                {b.data.pubDate.toLocaleString("default", {
+                                    year: "numeric",
+                                    month: "short",
+                                })}
+                            </span>
+                        </div>
 
-						<div class="flex flex-1 flex-col gap-2 justify-center">
-							<div class="flex flex-row gap-1 flex-wrap">
-								<a
-									href={`/posts/${b.slug}`}
-									class="text-xl font-bold link no-underline hover:underline w-fit"
-								>
-									{b.data.title}
-								</a>
-								{!b.data.publish && (
-									<span class="badge badge-sm badge-neutral">
-										DRAFT
-									</span>
-								)}
-							</div>
+                        <div class="flex flex-1 flex-col gap-2 justify-center">
+                            <div class="flex flex-row gap-1 flex-wrap">
+                                <a
+                                    href={`/posts/${b.slug}`}
+                                    class="text-xl font-bold link no-underline hover:underline w-fit"
+                                >
+                                    {b.data.title}
+                                </a>
+                                {!b.data.publish && (
+                                    <span class="badge badge-sm badge-neutral">
+                                        DRAFT
+                                    </span>
+                                )}
+                            </div>
 
-							<p>{b.data.description}</p>
-						</div>
-					</li>
-				))
-			}
-		</ul>
+                            <p>{b.data.description}</p>
+                            <ul class="flex flex-row gap-1 flex-wrap">
+                                {b.data.tags &&
+                                    b.data.tags.map((tag) => (
+                                        <li class="badge badge-ghost badge-sm">
+                                            {tag}
+                                        </li>
+                                    ))}
+                            </ul>
+                        </div>
+                    </li>
+                ))
+            }
+        </ul>
 
-		<div class="mt-8 w-full flex flex-col items-center">
-			<div class="join">
-				{
-					page.currentPage > 1 && (
-						<a
-							href={`/posts/${page.currentPage - 1}`}
-							class="join-item btn btn-sm"
-						>
-							«
-						</a>
-					)
-				}
-				<a href="." class="join-item btn btn-disabled btn-sm"
-					>Page {page.currentPage}</a
-				>
-				{
-					page.currentPage < page.lastPage && (
-						<a
-							href={`/posts/${page.currentPage + 1}`}
-							class="join-item btn btn-sm"
-						>
-							»
-						</a>
-					)
-				}
-			</div>
-		</div>
-	</main>
+        <div class="mt-8 w-full flex flex-col items-center">
+            <div class="join">
+                {
+                    page.currentPage > 1 && (
+                        <a
+                            href={`/posts/${page.currentPage - 1}`}
+                            class="join-item btn btn-sm"
+                        >
+                            «
+                        </a>
+                    )
+                }
+                <a href="." class="join-item btn btn-disabled btn-sm"
+                    >Page {page.currentPage}</a
+                >
+                {
+                    page.currentPage < page.lastPage && (
+                        <a
+                            href={`/posts/${page.currentPage + 1}`}
+                            class="join-item btn btn-sm"
+                        >
+                            »
+                        </a>
+                    )
+                }
+            </div>
+        </div>
+    </main>
 </Layout>
