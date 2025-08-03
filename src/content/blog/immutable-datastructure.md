@@ -2,7 +2,7 @@
 title: "Immutable Data Structures: Theory to Real-World Gains"
 description: "Exploring immutable data structures and how they solved a critical performance bottleneck in a high-throughput WebSocket system"
 tags: ["performance", "rust"]
-pubDate: 2024-08-03
+pubDate: 2025-08-03
 publish: true
 ---
 
