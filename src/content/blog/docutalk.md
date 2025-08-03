@@ -2,7 +2,7 @@
 title: "DocuTalk"
 description: "Tiny story about building & selling a chatbot, and what I learned."
 tags: ["SaaS", "ChatGPT", "GenAI", "LLM"]
-pubDate: 2023-01-15
+pubDate: 2023-08-15
 publish: true
 ---
 
