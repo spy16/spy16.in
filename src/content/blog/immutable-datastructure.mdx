@@ -6,6 +6,10 @@ pubDate: 2025-08-03
 publish: true
 ---
 
+import { Image } from "astro:assets";
+import afterImbl from "./after-imbl.png";
+import beforeImbl from "./before-imbl.png";
+
 ## What Are Immutable Data Structures?
 
 Immutable data structures are collections that cannot be modified after creation. Instead of changing existing data in place, operations on immutable structures return new versions while preserving the original. This might sound inefficient at first glance—wouldn't creating new copies for every change be wasteful? The key insight is that well-designed immutable structures use **structural sharing** to avoid unnecessary duplication.
@@ -81,6 +85,11 @@ Now, instead of deep cloning the entire map on every subscription change, the sy
 3. Send this lightweight reference across to the distribution task
 
 The results were dramatic: **latency dropped from ~6ms to 500µs-1ms range**—roughly an order of magnitude improvement!
+
+See the before and after latency profiles.
+
+<Image src={beforeImbl} alt="Before" class="h-[400px] w-full" />
+<Image src={afterImbl} alt="After" class="h-[400px] w-full" />
 
 This performance gain came from the structural sharing properties of the immutable data structures. When a client subscribed to a topic, only the specific topic's subscriber list needed to be modified. All other topics in the map remained completely unchanged and were shared between the old and new versions. The "clone" operation became just copying a few pointers rather than deep-copying potentially thousands of subscriber lists.
 
