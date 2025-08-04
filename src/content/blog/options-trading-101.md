@@ -8,121 +8,237 @@ publish: true
 
 Just some notes I took while learning options trading and building a trading platform at Sahi.
 
-Options are contracts giving you the right (not obligation) to buy/sell an underlying at a strike price before expiration.
+## Understanding Options: The Core Intuition
 
-**Call Options:**
+Think of options like insurance contracts. Just as you pay a premium for car insurance that gives you the _right_ (not obligation) to claim money if something happens, options give you the _right_ to buy or sell at a specific price.
 
-- Buyers profit when spot > strike (unlimited upside)
-- Sellers profit when spot < strike but face unlimited risk
-- Example: Buy NIFTY 20,000 call for ₹100 premium, profit ₹400 if it closes at 20,500 (₹500 intrinsic value - ₹100 premium). Seller receives ₹100 premium but loses ₹400 as they must deliver at 20,000 when spot is 20,500
+**Call Options - Betting on Price Going Up:**
 
-**Put Options:**
+_Intuition:_ You think NIFTY will rise above 20,000, but you don't want to buy the entire index. Instead, you pay ₹100 for the _right_ to buy at 20,000. If NIFTY hits 20,500, you can "buy" at 20,000 and immediately "sell" at 20,500 for ₹500 profit (minus your ₹100 premium = ₹400 net profit).
 
-- Buyers profit when spot < strike
-- Sellers profit when spot > strike
-- Example: Buy NIFTY 20,000 put for ₹100 premium, profit ₹400 if it closes at 19,500 (₹500 intrinsic value - ₹100 premium). Seller receives ₹100 premium but loses ₹400 as they must buy at 20,000 when spot is 19,500
+_As a trader:_
 
-Key reminder: Option buyers have limited risk (premium paid) but sellers face potentially unlimited losses, especially on calls.
+- **Buy calls** when you're bullish but want limited risk
+- **Sell calls** when you think the market won't rise much (collect premium income)
+- **Risk management:** Call buyers risk only the premium; call sellers face unlimited losses
 
-## Key Terminologies
+**Put Options - Betting on Price Going Down:**
 
-**Basic Terms:**
+_Intuition:_ You think NIFTY will fall below 20,000. You pay ₹100 for the _right_ to sell at 20,000. If NIFTY drops to 19,500, you can "sell" at 20,000 when market price is 19,500, pocketing ₹500 (minus ₹100 premium = ₹400 profit).
 
-- **Premium**: The price you pay to buy an option or receive for selling one. This is your maximum loss as a buyer or immediate profit as a seller
-- **Strike Price**: The price at which you can exercise the option (buy for calls, sell for puts)
-- **Expiry**: The date when the option contract expires. In India, monthly options expire on the last Thursday of each month
-- **Open Interest (OI)**: Total number of outstanding option contracts that haven't been settled. High OI indicates strong interest at that strike
+_As a trader:_
 
-**Moneyness:**
+- **Buy puts** for downside protection or bearish bets with limited risk
+- **Sell puts** to collect premium when you think the market won't fall much
+- **Strategy tip:** Use puts as portfolio insurance during uncertain times
 
-- **ITM (In The Money)**: Calls with their `strike < spot`, puts with their `strike > spot`. These have intrinsic value
-- **ATM (At The Money)**: Options with their strike ≈ spot. Highest time value and most liquid
-- **OTM (Out of The Money)**: Calls with their `strike > spot`, puts with their `strike < spot`. Only time value, no intrinsic value
+## Key Terminologies with Trading Applications
 
-**Valuation:**
+**Premium - Your Skin in the Game:**
 
-- **Intrinsic Value**: The immediate exercise value. For calls: `max(spot - strike, 0)`. For puts: `max(strike - spot, 0)`
-- **Time Value**: `Premium - Intrinsic Value`. Decays as expiry approaches (theta decay)
-- **Implied Volatility (IV)**: Market's expectation of future price movement. Higher IV = higher premiums. Often spikes before events
+_Intuition:_ Premium is like paying rent for the right to control an expensive asset. You pay ₹100 to control ₹500,000 worth of NIFTY for a month.
 
-**The Greeks:**
+_Trading Applications:_
 
-- **Delta**: Price sensitivity. How much option price changes per ₹1 move in underlying. Calls: 0 to 1, Puts: 0 to -1
-- **Gamma**: Delta's rate of change. Higher for ATM options. Shows how delta accelerates
-- **Theta**: Time decay. How much premium erodes daily. Always negative for buyers, positive for sellers
-- **Vega**: IV sensitivity. How much option price changes per 1% change in implied volatility
-- **Rho**: Interest rate sensitivity. Usually least important for short-term trades
+- **Premium hunting:** Sell options when premiums are inflated (high IV days)
+- **Bargain hunting:** Buy options when premiums are cheap (low IV periods)
+- **Risk sizing:** Never risk more than 2-5% of your portfolio on option buying
+- **Income generation:** Systematic premium selling can generate monthly income
 
-## Market Indicators and Advanced Concepts
+**Strike Price - Your Trigger Level:**
 
-**Max Pain:**
+_Intuition:_ This is your "activation price." Below/above this level, your option starts making real money.
 
-Max Pain is the strike price where the maximum number of options (both calls and puts) expire worthless, causing maximum financial pain to option buyers and maximum profit to option sellers.
+_Trading Applications:_
 
-Think of it this way: imagine you're an option seller (market maker) who has sold both calls and puts across various strikes. You want the market to close at a price where most of these options become worthless, so you don't have to pay out. Max Pain theory suggests that market makers, having deep pockets and sophisticated strategies, will try to push the market toward this price near expiry.
+- **Probability assessment:** OTM strikes are cheaper but less likely to succeed
+- **Risk-reward balance:** ITM options are safer but more expensive
+- **Strike selection strategy:** Choose strikes based on your conviction level
 
-**How it works:** Calculate the total value of calls and puts that would be ITM at each strike price. The strike with the lowest total value is Max Pain.
+**Expiry - Your Deadline:**
 
-**Application:** Many traders watch Max Pain as a potential target for where the market might gravitate toward expiry. However, it's not a guarantee - just one factor among many. It tends to be more relevant on expiry days when time decay is maximum.
+_Intuition:_ Options are like milk - they have an expiration date. The closer to expiry, the faster they lose value if they're not profitable.
 
-**PCR (Put-Call Ratio):**
+_Trading Applications:_
 
-PCR measures the ratio of put options to call options, either by volume or open interest. It's calculated as: `Total Put Volume (or OI) / Total Call Volume (or OI)`.
+- **Time horizon matching:** Use weekly options for short-term trades, monthly for longer views
+- **Expiry day trading:** Markets often move toward Max Pain on expiry
+- **Calendar strategies:** Sell near-expiry options while buying longer-dated ones
 
-The intuition is simple: if more people are buying puts than calls, it suggests bearish sentiment (people expect the market to fall). If more people are buying calls, it suggests bullish sentiment.
+**Open Interest (OI) - The Crowd Indicator:**
 
-**Interpreting PCR:**
+_Intuition:_ OI shows where the "crowd" is placing their bets. High OI strikes act like magnets - price often gravitates toward them.
 
-- PCR > 1: More puts than calls (bearish sentiment)
-- PCR < 1: More calls than puts (bullish sentiment)
-- PCR around 0.7-1.3: Generally considered normal range
+_Trading Applications:_
 
-**Application:** PCR is often used as a contrarian indicator. When PCR gets extremely high (say above 1.5), it might indicate oversold conditions and a potential bounce. When extremely low (below 0.5), it might indicate overbought conditions. The logic is that when everyone is positioned one way, the market often moves the opposite direction.
+- **Support/Resistance:** High OI puts often act as support, high OI calls as resistance
+- **Breakout confirmation:** When price moves past high OI levels decisively, big moves follow
+- **Contrarian signals:** Extreme OI buildup at one side often leads to opposite moves
 
-**ATM Straddle Price:**
+**Moneyness - Your Probability Meter:**
 
-An ATM straddle involves buying both a call and put option at the same strike price (closest to current spot price) with the same expiry.
+_ITM (In The Money) - Already Winning:_
+_Intuition:_ These are like being ahead in a race - you're already profitable if you exercised now.
+_Trading Application:_ Use ITM options when you want higher probability trades with less leverage
 
-Think of it as making a bet that the market will move significantly in either direction, but you don't know which way. You profit if the market moves beyond your breakeven points in either direction.
+_ATM (At The Money) - On the Edge:_
+_Intuition:_ These are the most sensitive to price movements - small moves create big percentage changes.
+_Trading Application:_ Best for day trading and when you expect significant moves
 
-**The price tells you:** The ATM straddle price represents the market's expectation of how much the underlying might move by expiry. If NIFTY is at 20,000 and the ATM straddle costs ₹400, the market expects NIFTY to move at least 400 points (either to 19,600 or 20,400) for the straddle buyer to breakeven.
+_OTM (Out of The Money) - Lottery Tickets:_
+_Intuition:_ These are like lottery tickets - cheap but need big moves to pay off.
+_Trading Application:_ Use for high-conviction trades or when buying insurance
 
-**Application:**
+**Intrinsic Value - Real Money:**
 
-- **Before events:** Straddle prices often increase before earnings, policy announcements, or major events as volatility expectations rise
-- **Market timing:** If you expect a big move but don't know the direction, you might buy a straddle
-- **Volatility trading:** Straddle prices help you understand if volatility is expensive or cheap
+_Intuition:_ This is the "real" value - money you could extract right now. Everything else is hope and time.
 
-**ATM IV (Implied Volatility):**
+_Trading Applications:_
 
-ATM IV is the implied volatility of at-the-money options. It represents the market's expectation of how volatile the underlying will be until expiry.
+- **Exercise decisions:** Only exercise when intrinsic value exceeds transaction costs
+- **Deep ITM strategy:** Focus on intrinsic value when trading deep ITM options
+- **Value assessment:** Compare intrinsic vs time value to gauge option attractiveness
 
-Here's the intuition: if people expect the market to be very choppy and move a lot, they'll pay higher premiums for options. This higher premium translates to higher implied volatility. If people expect calm, sideways movement, premiums will be lower, leading to lower IV.
+**Time Value - The Cost of Hope:**
 
-**Understanding IV levels:**
+_Intuition:_ This is what you pay for the possibility that your option becomes more valuable. Like paying extra for a lottery ticket with better odds.
 
-- High IV (above historical averages): Market expects big moves, options are expensive
-- Low IV (below historical averages): Market expects calm conditions, options are cheap
-- IV often spikes during uncertainty and crashes after events (IV crush)
+_Trading Applications:_
 
-**Application:**
+- **Time decay harvesting:** Sell options to collect time value, especially in the last 30 days
+- **Weekend effect:** Time value erodes over weekends even when markets are closed
+- **Theta strategies:** Sell ATM options to maximize time decay collection
 
-- **Option buying:** Prefer buying when IV is low (cheaper premiums)
-- **Option selling:** Prefer selling when IV is high (collect higher premiums)
-- **Event trading:** IV usually spikes before events and collapses after, regardless of the actual move
+**Implied Volatility (IV) - The Fear/Greed Gauge:**
 
-**Synthetic Future Price:**
+_Intuition:_ IV is like the market's anxiety level. When everyone's nervous, they pay more for insurance (options). When everyone's calm, insurance is cheap.
 
-A synthetic future is created by buying a call and selling a put at the same strike price and expiry. This combination mimics the payoff of owning the underlying asset.
+_Trading Applications:_
 
-Here's why: If the market goes up, your call gains value while the put you sold expires worthless. If the market goes down, your call expires worthless but you lose money on the put you sold (since you have to buy at the higher strike when market is lower). This creates the same profit/loss profile as owning the underlying.
+- **Buy low IV, sell high IV:** Your primary edge in options trading
+- **Event trading:** Buy options before events when IV is low, sell when IV spikes
+- **IV rank:** Only sell options when IV is in the top 25% of its 52-week range
 
-**The price relationship:** In theory, `Synthetic Future Price = Strike + Call Premium - Put Premium`. This should equal the actual future price. When there's a difference, it creates arbitrage opportunities.
+## The Greeks - Your Risk Dashboard
 
-**Application:**
+**Delta - Your Speed Gauge:**
 
-- **Arbitrage:** If synthetic future price differs significantly from actual future price, sophisticated traders can profit from this mismatch
-- **Cost efficiency:** Sometimes it's cheaper to create synthetic positions than buying the underlying directly
-- **Strategy building:** Understanding synthetics helps in creating complex strategies and understanding position equivalencies
+_Intuition:_ Delta tells you how fast your option price moves relative to the stock. A 0.5 delta means your option gains ₹50 when the stock gains ₹100.
 
-**Key Insight:** All these indicators work together. For example, high ATM IV often coincides with high straddle prices (since straddle prices increase with volatility). PCR might spike when people expect a fall, which could also increase put IVs. Max Pain becomes more relevant when overall option activity is high. Understanding these relationships helps you build a complete picture of market sentiment and positioning.
+_Trading Applications:_
+
+- **Position sizing:** Use delta to calculate equivalent stock exposure
+- **Hedging:** If you're long 1000 delta worth of calls, hedge with 1000 shares short
+- **Momentum trading:** High delta options for trending markets, low delta for choppy markets
+
+**Gamma - Your Acceleration Meter:**
+
+_Intuition:_ Gamma shows how your delta changes. High gamma means your profits accelerate quickly in your favor (but losses accelerate too).
+
+_Trading Applications:_
+
+- **Scalping:** Use high gamma ATM options for quick trades
+- **Risk management:** High gamma positions need constant monitoring
+- **Gamma squeeze:** When dealers are short gamma, they amplify price movements
+
+**Theta - Your Daily Expense:**
+
+_Intuition:_ Theta is like a parking meter - it costs you money every day to hold the position.
+
+_Trading Applications:_
+
+- **Income strategies:** Sell options to collect theta daily
+- **Time management:** Buy options only when you expect moves within 2 weeks
+- **Theta decay acceleration:** Theta increases rapidly in the last 30 days
+
+**Vega - Your Volatility Exposure:**
+
+_Intuition:_ Vega measures how much you gain/lose when market anxiety changes, regardless of price direction.
+
+_Trading Applications:_
+
+- **Volatility trading:** Buy options before earnings, sell after (volatility crush)
+- **Market timing:** Sell options when VIX is high, buy when VIX is low
+- **Portfolio hedging:** Use high vega options to hedge volatility risk
+
+## Market Indicators and Advanced Applications
+
+**Max Pain - The Dealer's Target:**
+
+_Intuition:_ Imagine you're a casino owner. You want the roulette ball to land where most gamblers lose their bets. Max Pain is that number for options.
+
+_Trading Applications:_
+
+- **Expiry day strategy:** Expect price to gravitate toward Max Pain on expiry
+- **Contrarian trades:** When price is far from Max Pain, consider mean reversion
+- **Option selling:** Sell strikes away from Max Pain for higher probability wins
+- **Weekly planning:** Check Max Pain levels every Monday for the week's bias
+
+**PCR (Put-Call Ratio) - The Sentiment Thermometer:**
+
+_Intuition:_ PCR is like measuring how many people are buying umbrellas vs sunglasses. Too many umbrellas (puts) might mean rain clouds are priced in.
+
+_Trading Applications:_
+
+- **Contrarian signals:** PCR above 1.5 = potential bottom, below 0.5 = potential top
+- **Confirmation tool:** Rising PCR with falling prices confirms bearish sentiment
+- **Timing entries:** Extreme PCR readings often mark short-term reversal points
+- **Daily monitoring:** Track PCR changes to gauge shifting sentiment
+
+**ATM Straddle Price - The Market's Expectation:**
+
+_Intuition:_ This is the market's "minimum movement estimate." If the straddle costs ₹200, the market expects at least a 200-point move in either direction.
+
+_Trading Applications:_
+
+- **Event trading:** If you expect bigger moves than the straddle price suggests, buy it
+- **Volatility assessment:** Compare straddle price to historical moves to find value
+- **Range trading:** If you expect smaller moves, sell straddles and collect premium
+- **Earnings strategy:** Buy straddles 2-3 days before earnings, sell just before announcement
+
+**ATM IV - The Anxiety Index:**
+
+_Intuition:_ ATM IV is like the market's anxiety medication dosage. High IV means everyone's stressed and paying up for protection.
+
+_Trading Applications:_
+
+- **Buy when IV < 20th percentile:** Options are cheap, good for directional trades
+- **Sell when IV > 80th percentile:** Options are expensive, good for premium collection
+- **IV rank strategy:** Only initiate trades when IV rank supports your strategy
+- **Event calendar:** Track earnings/events that typically spike IV
+
+**Synthetic Future Price - The Arbitrage Detector:**
+
+_Intuition:_ This is like comparing the price of buying a car vs leasing with an option to buy. They should cost roughly the same.
+
+_Trading Applications:_
+
+- **Fair value assessment:** When synthetic differs from future price, arbitrage exists
+- **Cost efficiency:** Sometimes synthetics are cheaper than direct futures
+- **Strategy conversion:** Convert losing long calls to synthetic futures by selling puts
+- **Professional edge:** Understanding synthetics helps optimize position management
+
+## Practical Trading Framework
+
+**Pre-Market Routine:**
+
+1. Check ATM IV percentile - determines if you should buy or sell options
+2. Review PCR levels - gauge sentiment extremes
+3. Identify Max Pain levels - understand dealer targets
+4. Assess straddle prices for major events
+
+**Position Management:**
+
+1. **Option buying:** Target 20-50% profits, cut losses at 50%
+2. **Option selling:** Target 25-50% of maximum profit, close at 2x credit received loss
+3. **Time management:** Close all positions 7 days before expiry
+4. **IV management:** Sell when IV rank > 50%, buy when IV rank < 30%
+
+**Risk Rules:**
+
+1. Never risk more than 5% of portfolio on any single options trade
+2. Diversify across different expiries and strikes
+3. Always define your maximum loss before entering
+4. Use stop-losses based on underlying price, not option price
+
+Remember: Options trading is about probabilities, not certainties. Master these concepts, but always respect the market's ability to surprise you.
