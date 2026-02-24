@@ -10,16 +10,16 @@ importers:
     dependencies:
       '@astro-community/astro-embed-youtube':
         specifier: ^0.4.3
-        version: 0.4.3(astro@4.0.3)
+        version: 0.4.3(astro@4.0.3(typescript@5.3.2))
       '@astrojs/check':
         specifier: ^0.3.1
         version: 0.3.1(typescript@5.3.2)
       '@astrojs/cloudflare':
         specifier: ^7.7.1
-        version: 7.7.1(astro@4.0.3)
+        version: 7.7.1(astro@4.0.3(typescript@5.3.2))
       '@astrojs/mdx':
         specifier: ^1.1.5
-        version: 1.1.5(astro@4.0.3)
+        version: 1.1.5(astro@4.0.3(typescript@5.3.2))
       '@astrojs/prefetch':
         specifier: ^0.4.1
         version: 0.4.1
@@ -27,11 +27,11 @@ importers:
         specifier: ^3.0.0
         version: 3.0.0
       '@astrojs/sitemap':
-        specifier: ^3.0.3
+        specifier: 3.0.3
         version: 3.0.3
       '@astrojs/tailwind':
         specifier: ^5.0.2
-        version: 5.0.2(astro@4.0.3)(tailwindcss@3.3.5)
+        version: 5.0.2(astro@4.0.3(typescript@5.3.2))(tailwindcss@3.3.5)
       '@fontsource/chilanka':
         specifier: ^5.0.17
         version: 5.0.17
@@ -39,7 +39,7 @@ importers:
         specifier: ^0.5.10
         version: 0.5.10(tailwindcss@3.3.5)
       astro:
-        specifier: ^4.0.3
+        specifier: 4.0.3
         version: 4.0.3(typescript@5.3.2)
       date-fns:
         specifier: ^2.30.0
@@ -68,7 +68,7 @@ importers:
         version: 1.8.6
       daisyui:
         specifier: ^4.4.14
-        version: 4.4.14(postcss@8.4.31)
+        version: 4.4.14(postcss@8.4.32)
       unplugin-icons:
         specifier: ^0.18.0
         version: 0.18.0
@@ -2270,6 +2270,7 @@ packages:
   prebuild-install@7.1.1:
     resolution: {integrity: sha512-jAXscXWMcCK8GgCoHOfIr0ODh5ai8mj63L2nWrjuAgXE6tDyYGnx4/8o/rCgU+B4JSyZBKbeZqzhtwtC3ovxjw==}
     engines: {node: '>=10'}
+    deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
     hasBin: true
 
   preferred-pm@3.1.2:
@@ -3081,7 +3082,7 @@ snapshots:
 
   '@antfu/utils@0.7.6': {}
 
-  '@astro-community/astro-embed-youtube@0.4.3(astro@4.0.3)':
+  '@astro-community/astro-embed-youtube@0.4.3(astro@4.0.3(typescript@5.3.2))':
     dependencies:
       astro: 4.0.3(typescript@5.3.2)
       lite-youtube-embed: 0.2.0
@@ -3098,7 +3099,7 @@ snapshots:
       - prettier
       - prettier-plugin-astro
 
-  '@astrojs/cloudflare@7.7.1(astro@4.0.3)':
+  '@astrojs/cloudflare@7.7.1(astro@4.0.3(typescript@5.3.2))':
     dependencies:
       '@astrojs/underscore-redirects': 0.3.3
       '@cloudflare/workers-types': 4.20231121.0
@@ -3149,7 +3150,7 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@astrojs/markdown-remark@3.5.0(astro@4.0.3)':
+  '@astrojs/markdown-remark@3.5.0(astro@4.0.3(typescript@5.3.2))':
     dependencies:
       '@astrojs/prism': 3.0.0
       astro: 4.0.3(typescript@5.3.2)
@@ -3169,7 +3170,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@astrojs/markdown-remark@4.0.0(astro@4.0.3)':
+  '@astrojs/markdown-remark@4.0.0(astro@4.0.3(typescript@5.3.2))':
     dependencies:
       '@astrojs/prism': 3.0.0
       astro: 4.0.3(typescript@5.3.2)
@@ -3189,9 +3190,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@astrojs/mdx@1.1.5(astro@4.0.3)':
+  '@astrojs/mdx@1.1.5(astro@4.0.3(typescript@5.3.2))':
     dependencies:
-      '@astrojs/markdown-remark': 3.5.0(astro@4.0.3)
+      '@astrojs/markdown-remark': 3.5.0(astro@4.0.3(typescript@5.3.2))
       '@mdx-js/mdx': 2.3.0
       acorn: 8.11.2
       astro: 4.0.3(typescript@5.3.2)
@@ -3228,7 +3229,7 @@ snapshots:
       sitemap: 7.1.1
       zod: 3.22.4
 
-  '@astrojs/tailwind@5.0.2(astro@4.0.3)(tailwindcss@3.3.5)':
+  '@astrojs/tailwind@5.0.2(astro@4.0.3(typescript@5.3.2))(tailwindcss@3.3.5)':
     dependencies:
       astro: 4.0.3(typescript@5.3.2)
       autoprefixer: 10.4.16(postcss@8.4.31)
@@ -3865,7 +3866,7 @@ snapshots:
     dependencies:
       '@astrojs/compiler': 2.3.2
       '@astrojs/internal-helpers': 0.2.1
-      '@astrojs/markdown-remark': 4.0.0(astro@4.0.3)
+      '@astrojs/markdown-remark': 4.0.0(astro@4.0.3(typescript@5.3.2))
       '@astrojs/telemetry': 3.0.4
       '@babel/core': 7.23.5
       '@babel/generator': 7.23.5
@@ -4142,12 +4143,12 @@ snapshots:
 
   culori@3.3.0: {}
 
-  daisyui@4.4.14(postcss@8.4.31):
+  daisyui@4.4.14(postcss@8.4.32):
     dependencies:
       css-selector-tokenizer: 0.8.0
       culori: 3.3.0
       picocolors: 1.0.0
-      postcss-js: 4.0.1(postcss@8.4.31)
+      postcss-js: 4.0.1(postcss@8.4.32)
     transitivePeerDependencies:
       - postcss
 
@@ -5816,11 +5817,17 @@ snapshots:
       camelcase-css: 2.0.1
       postcss: 8.4.31
 
+  postcss-js@4.0.1(postcss@8.4.32):
+    dependencies:
+      camelcase-css: 2.0.1
+      postcss: 8.4.32
+
   postcss-load-config@4.0.2(postcss@8.4.31):
     dependencies:
       lilconfig: 3.0.0
-      postcss: 8.4.31
       yaml: 2.3.4
+    optionalDependencies:
+      postcss: 8.4.31
 
   postcss-nested@6.0.1(postcss@8.4.31):
     dependencies:
@@ -6382,7 +6389,7 @@ snapshots:
   ts-interface-checker@0.1.13: {}
 
   tsconfck@3.0.0(typescript@5.3.2):
-    dependencies:
+    optionalDependencies:
       typescript: 5.3.2
 
   tslib@2.6.2: {}
@@ -6582,38 +6589,40 @@ snapshots:
       fsevents: 2.3.3
 
   vitefu@0.2.5(vite@5.0.6):
-    dependencies:
+    optionalDependencies:
       vite: 5.0.6
 
   volar-service-css@0.0.16(@volar/language-service@1.10.10):
     dependencies:
-      '@volar/language-service': 1.10.10
       vscode-css-languageservice: 6.2.11
       vscode-uri: 3.0.8
+    optionalDependencies:
+      '@volar/language-service': 1.10.10
 
   volar-service-emmet@0.0.16(@volar/language-service@1.10.10):
     dependencies:
-      '@volar/language-service': 1.10.10
       '@vscode/emmet-helper': 2.9.2
       volar-service-html: 0.0.16(@volar/language-service@1.10.10)
+    optionalDependencies:
+      '@volar/language-service': 1.10.10
 
   volar-service-html@0.0.16(@volar/language-service@1.10.10):
     dependencies:
-      '@volar/language-service': 1.10.10
       vscode-html-languageservice: 5.1.1
       vscode-uri: 3.0.8
+    optionalDependencies:
+      '@volar/language-service': 1.10.10
 
   volar-service-prettier@0.0.16(@volar/language-service@1.10.10):
-    dependencies:
+    optionalDependencies:
       '@volar/language-service': 1.10.10
 
   volar-service-typescript-twoslash-queries@0.0.16(@volar/language-service@1.10.10):
-    dependencies:
+    optionalDependencies:
       '@volar/language-service': 1.10.10
 
   volar-service-typescript@0.0.16(@volar/language-service@1.10.10)(@volar/typescript@1.10.10):
     dependencies:
-      '@volar/language-service': 1.10.10
       '@volar/typescript': 1.10.10
       path-browserify: 1.0.1
       semver: 7.5.4
@@ -6621,6 +6630,8 @@ snapshots:
       vscode-languageserver-textdocument: 1.0.11
       vscode-nls: 5.2.0
       vscode-uri: 3.0.8
+    optionalDependencies:
+      '@volar/language-service': 1.10.10
 
   vscode-css-languageservice@6.2.11:
     dependencies:
