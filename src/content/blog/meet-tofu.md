@@ -2,7 +2,7 @@
 title: "Meet Tofu: My AI Assistant That Actually Does Stuff"
 description: "I built a personal AI assistant that lives in my Telegram. Here's what it can do, how it works, and where I think AI assistants are headed."
 tags: ["ai", "personal-assistant", "openclaw"]
-pubDate: 2025-02-24
+pubDate: 2026-02-24
 publish: true
 ---
 
