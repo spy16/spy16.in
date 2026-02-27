@@ -10,7 +10,7 @@ publish: true
 
 ---
 
-You've opened Zerodha. You see green numbers, red numbers, candles that look like modern art, and an order form that asks if you want "market" or "limit." You close the app.
+You've opened your trading app. You see green numbers, red numbers, candles that look like modern art, and an order form that asks if you want "market" or "limit." You close the app.
 
 Sound familiar? Let's fix that today. By the end of this post, you'll understand what's actually happening when you hit that buy button — and more importantly, *why prices move the way they do.*
 
@@ -44,7 +44,7 @@ Not everyone in the market is the same. Understanding who's playing — and how 
 
 ### Retail Traders (That's You and Me)
 
-Individual investors trading with their own money through brokers like Zerodha, Groww, or Angel One. We're the small fish. Retail traders account for roughly 35-45% of NSE's daily turnover, which sounds like a lot until you realize...
+Individual investors trading with their own money through brokers like Sahi. We're the small fish. Retail traders account for roughly 35-45% of NSE's daily turnover, which sounds like a lot until you realize...
 
 ### Institutional Investors
 
@@ -68,7 +68,7 @@ Algorithmic traders with co-located servers *inside* the exchange, executing tho
 
 ## Reading a Stock Quote
 
-Pull up any stock on Kite or any trading app. Here's what you're actually looking at:
+Pull up any stock on Sahi or any trading app. Here's what you're actually looking at:
 
 ### OHLC — The Four Sacred Numbers
 
@@ -136,7 +136,7 @@ There are two variants:
 
 ### GTT (Good Till Triggered)
 
-A Zerodha-specific feature (other brokers have equivalents). It's a stop-loss or target order that stays active for up to a year. You set it and forget it. Perfect for long-term positions where you want automatic risk management without watching the screen daily.
+A feature available on brokers like Sahi. It's a stop-loss or target order that stays active for up to a year. You set it and forget it. Perfect for long-term positions where you want automatic risk management without watching the screen daily.
 
 ### AMO (After Market Order)
 
