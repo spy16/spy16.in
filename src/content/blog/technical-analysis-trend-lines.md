@@ -2,7 +2,7 @@
 title: "Technical Analysis — Trend Lines and Trend Identification"
 description: "Learn how to draw trend lines, identify uptrends and downtrends, and use trend analysis to make better trading decisions."
 tags: ["trading", "learn-trading"]
-pubDate: 2026-03-01
+pubDate: 2026-02-28
 publish: true
 ---
 
