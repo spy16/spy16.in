@@ -1,7 +1,7 @@
 ---
 import { isBefore } from "date-fns";
 import { type GetStaticPaths } from "astro";
-import { getCollection } from "astro:content";
+import { type CollectionEntry, getCollection } from "astro:content";
 import Layout from "../../../layouts/Layout.astro";
 
 export const getStaticPaths: GetStaticPaths = async () => {
@@ -31,7 +31,12 @@ export const getStaticPaths: GetStaticPaths = async () => {
     }));
 };
 
-const { category, posts } = Astro.props;
+interface Props {
+    category: string;
+    posts: CollectionEntry<"blog">[];
+}
+
+const { category, posts }: Props = Astro.props;
 
 const categoryInfo: Record<string, { emoji: string; name: string }> = {
     ai: { emoji: "🤖", name: "AI & Assistants" },

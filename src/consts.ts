@@ -8,13 +8,10 @@ import MdiInstagram from "~icons/mdi/instagram";
 import MdiGmail from "~icons/mdi/gmail";
 
 import DeviconRedis from "~icons/devicon/redis";
-import DeviconSvelte from "~icons/devicon/svelte";
-import DeviconClojure from "~icons/devicon/clojure";
 import DeviconPostgresql from "~icons/devicon/postgresql";
 import DeviconGoWordmark from "~icons/devicon/go-wordmark";
 import DeviconRust from "~icons/devicon/rust";
 import DeviconApachekafka from "~icons/devicon/apachekafka";
-import DeviconSupabase from "~icons/devicon/supabase";
 import DeviconAmazonwebservicesWordmark from "~icons/devicon/amazonwebservices-wordmark";
 
 import aarityaLogo from "./assets/sahi.png";
