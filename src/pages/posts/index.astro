@@ -1,0 +1,70 @@
+---
+import { getCollection } from "astro:content";
+import Layout from "../../layouts/Layout.astro";
+
+const posts = (await getCollection("blog"))
+    .filter((p) => {
+        if (import.meta.env.PROD) return !!p.data.publish;
+        return true;
+    });
+
+// Extract unique categories from post slugs
+const categories = Array.from(
+    new Set(posts.map((p) => p.slug.split("/")[0]))
+).sort();
+
+// Count posts per category
+const categoryCounts = categories.reduce(
+    (acc, cat) => {
+        acc[cat] = posts.filter((p) => p.slug.startsWith(cat)).length;
+        return acc;
+    },
+    {} as Record<string, number>
+);
+
+// Category display info
+const categoryInfo: Record<string, { emoji: string; description: string }> = {
+    ai: { emoji: "🤖", description: "AI & Assistants" },
+    engineering: { emoji: "⚙️", description: "Software Engineering" },
+    trading: { emoji: "📈", description: "Trading & Markets" },
+};
+---
+
+<Layout title="Blog Posts">
+    <main
+        class="flex flex-col gap-6 items-center w-full max-w-screen-md mx-auto px-2"
+    >
+        <h1 class="text-xl font-bold">Blog Posts</h1>
+        <p class="text-sm text-gray-600">
+            Organized by category. Click to explore.
+        </p>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+            {
+                categories.map((category) => {
+                    const info =
+                        categoryInfo[category] ||
+                        { emoji: "📝", description: category };
+                    const count = categoryCounts[category];
+
+                    return (
+                        <a
+                            href={`/posts/${category}`}
+                            class="card card-bordered hover:shadow-lg transition-shadow"
+                        >
+                            <div class="card-body items-center text-center gap-3">
+                                <span class="text-4xl">{info.emoji}</span>
+                                <h2 class="card-title text-lg">
+                                    {info.description}
+                                </h2>
+                                <p class="text-sm text-gray-600">
+                                    {count} {count === 1 ? "post" : "posts"}
+                                </p>
+                            </div>
+                        </a>
+                    );
+                })
+            }
+        </div>
+    </main>
+</Layout>
