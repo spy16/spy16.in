@@ -25,9 +25,10 @@ html {
 
 #brain canvas {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
   width: 100%;
-  height: 100%;
+  height: 100lvh;
   z-index: 0;
   opacity: calc(var(--field-opacity, 1) - var(--scroll-dim, 0));
   transition: opacity 0.8s ease;
@@ -38,7 +39,7 @@ html {
 }
 
 #brain canvas[data-mode="post"] {
-  --field-opacity: 0.32;
+  --field-opacity: 0.22;
 }
 
 #brain canvas[data-mode="page"] {
@@ -52,6 +53,7 @@ html {
 
   #brain canvas[data-mode="post"] {
     --field-opacity: 0.75;
+    mask-image: linear-gradient(to right, #000 calc(50% - 31rem), rgb(0 0 0 / 0.15) calc(50% - 24rem), rgb(0 0 0 / 0.15) calc(50% + 24rem), #000 calc(50% + 31rem));
   }
 }
 

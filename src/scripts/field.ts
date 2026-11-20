@@ -88,7 +88,7 @@ export function mount(cv: HTMLCanvasElement, brain: Brain) {
 
   const build = () => {
     dpr = Math.min(devicePixelRatio || 1, 2);
-    W = innerWidth; H = innerHeight;
+    W = cv.clientWidth; H = cv.clientHeight;
     cv.width = W * dpr; cv.height = H * dpr;
     rx = W * 0.46; ry = Math.min(H, W * 1.3) * 0.46;
     split = W >= SPLIT_MIN_W;
@@ -425,16 +425,16 @@ export function mount(cv: HTMLCanvasElement, brain: Brain) {
   const interactive = () => mode.kind === "home" || mode.kind === "index";
 
   addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "mouse") return;
     Object.assign(mouse, { x: e.clientX, y: e.clientY, on: true });
-    if (e.pointerType !== "mouse" || !interactive()) return;
+    if (!interactive()) return;
     if ((e.target as Element).closest("[data-neuron]")) return;
     hover = e.target === cv ? nodeAt(e.clientX, e.clientY) : -1;
     hoverDom = false;
     cv.style.cursor = hover >= 0 ? "pointer" : "";
   });
   document.documentElement.addEventListener("pointerleave", () => { mouse.on = false; hover = -1; });
-  addEventListener("pointerup", (e) => { if (e.pointerType !== "mouse") mouse.on = false; });
-  addEventListener("pointerdown", (e) => {
+  addEventListener("click", (e) => {
     if (!interactive() || e.target !== cv) return;
     const i = nodeAt(e.clientX, e.clientY);
     if (i >= 0) { e.preventDefault(); enter(i); return; }
@@ -442,6 +442,7 @@ export function mount(cv: HTMLCanvasElement, brain: Brain) {
     rings.push({ x: m.x, y: m.y, r: 0 });
   });
   document.addEventListener("pointerover", (e) => {
+    if (e.pointerType !== "mouse") return;
     const el = (e.target as Element).closest<HTMLElement>("[data-neuron], [data-lobe]");
     if (!el) return;
     if (el.dataset.lobe) { boostLobe = el.dataset.lobe; return; }
@@ -449,14 +450,16 @@ export function mount(cv: HTMLCanvasElement, brain: Brain) {
     if (i >= 0) { hover = i; hoverDom = true; N[i].ref = 0; fire(i); }
   });
   document.addEventListener("pointerout", (e) => {
+    if (e.pointerType !== "mouse") return;
     const el = (e.target as Element).closest<HTMLElement>("[data-neuron], [data-lobe]");
     if (!el || el.contains(e.relatedTarget as Node)) return;
     if (el.dataset.lobe) boostLobe = lobeFocus(); else hover = -1;
   });
   addEventListener("scroll", () => {
-    const max = document.documentElement.scrollHeight - H;
+    const max = document.documentElement.scrollHeight - innerHeight;
     read = max > 0 ? Math.min(1, scrollY / max) : 0;
-    cv.style.setProperty("--scroll-dim", mode.kind === "home" ? String(Math.min(0.6, scrollY / H)) : "0");
+    const dims = mode.kind === "home" || (mode.kind === "post" && W < SPLIT_MIN_W);
+    cv.style.setProperty("--scroll-dim", dims ? String(Math.min(0.6, scrollY / H)) : "0");
     if (focus >= 0 && read > 0.97 && !readFired) {
       readFired = true;
       N[focus].ref = 0; fire(focus);
@@ -464,7 +467,10 @@ export function mount(cv: HTMLCanvasElement, brain: Brain) {
     }
   }, { passive: true });
   let rt = 0;
-  addEventListener("resize", () => { clearTimeout(rt); rt = window.setTimeout(build, 150); });
+  addEventListener("resize", () => {
+    if (cv.clientWidth === W && cv.clientHeight === H) return;
+    clearTimeout(rt); rt = window.setTimeout(build, 150);
+  });
 
   build();
   if (!reduce) {

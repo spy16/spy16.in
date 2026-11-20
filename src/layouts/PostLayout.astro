@@ -15,7 +15,7 @@ const lobe = lobeOf(post);
 <Layout title={title} description={description} mode="post" focus={post.id}>
   <div class={`lobe-${lobe} read-progress fixed inset-x-0 top-0 z-30 h-0.5 bg-(--lobe) shadow-[0_0_10px_var(--lobe)]`}></div>
 
-  <main class={`lobe-${lobe} mx-auto max-w-3xl px-5 pt-28 pb-12 sm:px-6`}>
+  <main class={`lobe-${lobe} mx-auto max-w-3xl px-4 pt-28 pb-12 sm:px-6`}>
     <a href={`/posts/${lobe}/`} class="font-mono text-xs text-(--lobe) uppercase hover:underline">← {lobe} lobe</a>
     <h1 class="mt-4 font-display text-4xl leading-tight font-bold text-balance sm:text-5xl">{title}</h1>
     <p class="mt-5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-dim">
@@ -25,7 +25,7 @@ const lobe = lobeOf(post);
     </p>
 
     <article
-      class="glass mt-10 prose max-w-none bg-[rgb(8_10_20/.88)]! p-6 prose-invert prose-lg sm:p-10
+      class="mt-10 prose max-w-none prose-invert sm:prose-lg
         prose-headings:font-display prose-a:text-(--lobe) prose-img:mx-auto prose-img:rounded-xl"
     >
       <slot />
