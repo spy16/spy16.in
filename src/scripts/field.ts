@@ -9,11 +9,10 @@ import type { Brain, BrainPost } from "../lib/brain";
 const RGB: Record<string, string> = {
   ai: "180,140,255",
   engineering: "79,209,255",
-  trading: "255,179,71",
   base: "111,125,255",
   concept: "225,230,255",
 };
-const LOBE_ANGLE: Record<string, number> = { ai: -Math.PI / 2, engineering: Math.PI / 6, trading: (5 * Math.PI) / 6 };
+const LOBE_ANGLE: Record<string, number> = { ai: -Math.PI / 2, engineering: Math.PI / 2 - 0.35 };
 const MAX_PULSES = 1600;
 const TRACE_TAU_S = 2.2;
 const HEBB_TAU_S = 90;
@@ -121,7 +120,9 @@ export function mount(cv: HTMLCanvasElement, brain: Brain) {
       lobeLabels.push({
         lobe,
         x: Math.max(70, Math.min(W - 70, ns.reduce((s, n) => s + n.bx, 0) / ns.length)),
-        y: Math.max(76, Math.min(...ns.map((n) => n.by)) - 34),
+        y: Math.sin(LOBE_ANGLE[lobe]) > 0 && W > H
+          ?Math.min(H - 70, Math.max(...ns.map((n) => n.by)) + 34)
+          : Math.max(76, Math.min(...ns.map((n) => n.by)) - 34),
       });
       ids.slice(0, -1).forEach((pi, k) => link(postIdx[ids[k + 1]], postIdx[pi], "thread"));
     }

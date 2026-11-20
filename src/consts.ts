@@ -6,7 +6,7 @@ import docutalkLogo from "./assets/docutalk.png";
 import directiLogo from "./assets/directi.png";
 
 export const SITE_TITLE = "spy16.in";
-export const SITE_DESCRIPTION = "Prasad's brain, mapped: posts on engineering, trading and AI.";
+export const SITE_DESCRIPTION = "Prasad's brain, mapped: posts on engineering and AI.";
 export const TWITTER_HANDLE = "@spy16x";
 const EMAIL = "shiv.ylp@gmail.com";
 
@@ -17,7 +17,6 @@ export const EXPERIENCE = new Date().getFullYear() - 2016;
 export const LOBES = {
   ai: { name: "AI & Assistants", rgb: "180,140,255" },
   engineering: { name: "Software Engineering", rgb: "79,209,255" },
-  trading: { name: "Trading & Markets", rgb: "255,179,71" },
 } as const;
 
 export type Lobe = keyof typeof LOBES;
