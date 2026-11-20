@@ -1,0 +1,25 @@
+---
+import { getBrain } from "../lib/brain";
+
+const brain = await getBrain();
+---
+
+<div id="brain" transition:persist="brain">
+  <canvas aria-hidden="true"></canvas>
+  <script is:inline type="application/json" id="brain-data" set:html={JSON.stringify(brain)} />
+</div>
+
+<script>
+  import { mount, type Mode } from "../scripts/field";
+
+  const root = document.getElementById("brain")!;
+  const field = mount(root.querySelector("canvas")!, JSON.parse(document.getElementById("brain-data")!.textContent!));
+  let first = true;
+
+  document.addEventListener("astro:page-load", () => {
+    const { mode = "page", focus } = document.body.dataset;
+    field.setMode({ kind: mode as Mode["kind"], focus });
+    if (first && mode === "home") setTimeout(field.wave, 700);
+    first = false;
+  });
+</script>

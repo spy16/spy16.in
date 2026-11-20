@@ -1,28 +1,27 @@
 ---
-import { type GetStaticPaths } from "astro";
-import { type CollectionEntry, getCollection } from "astro:content";
+import type { GetStaticPaths } from "astro";
+import { render } from "astro:content";
+
 import PostLayout from "../../../layouts/PostLayout.astro";
+import { getPosts, getRelated, type Post } from "../../../lib/brain";
 
-export const getStaticPaths: GetStaticPaths = async () => {
-    const posts = await getCollection("blog");
+export const getStaticPaths = (async () => {
+  const posts = await getPosts();
+  return posts.map((post) => {
+    const [category, slug] = post.id.split("/");
+    return { params: { category, slug }, props: { post } };
+  });
+}) satisfies GetStaticPaths;
 
-    return posts.map((post) => {
-        const [category, ...slugParts] = post.slug.split("/");
-        const slug = slugParts.join("/");
+interface Props {
+  post: Post;
+}
 
-        return {
-            params: { category, slug },
-            props: post,
-        };
-    });
-};
-
-type Props = CollectionEntry<"blog">;
-
-const post = Astro.props;
-const { Content } = await post.render();
+const { post } = Astro.props;
+const { Content } = await render(post);
+const related = await getRelated(post);
 ---
 
-<PostLayout {...post}>
-    <Content />
+<PostLayout post={post} related={related}>
+  <Content />
 </PostLayout>

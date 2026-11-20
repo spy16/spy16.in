@@ -1,111 +1,117 @@
 ---
 import { Image } from "astro:assets";
-import { AVATAR, SKILLS, SOCIALS, WORK } from "../consts";
+
+import { AVATAR, EXPERIENCE, LOBES, SKILLS, SOCIALS, WORK, type Lobe } from "../consts";
 import Layout from "../layouts/Layout.astro";
+import { getPosts, lobeOf, readingMinutes, urlOf } from "../lib/brain";
+
+const posts = await getPosts();
+const recent = posts.slice(0, 4);
+const lobes = (Object.keys(LOBES) as Lobe[]).map((l) => ({ id: l, ...LOBES[l], posts: posts.filter((p) => lobeOf(p) === l) }));
+const legend = [
+  ["●", "bigger, nearer the centre", "a more recent thought"],
+  ["┄", "dotted line", "an idea two posts share"],
+  ["─", "solid thread", "a train of thought, old → new"],
+  ["⟿", "spark", "an association firing; its trace fades like short-term memory"],
+  ["◯", "ring", "a post you've already read"],
+];
 ---
 
-<Layout>
-    <main class="flex flex-col gap-2 max-w-2xl items-center mx-auto">
-        <section class="w-full">
-            <div class="flex flex-col items-center gap-4">
-                <img
-                    src={AVATAR}
-                    alt="shivaprasad bhat"
-                    class="rounded-full w-24 h-24"
-                />
-                <h1 class="text-3xl font-bold text-base-content">
-                    Hi, I am Prasad.
-                </h1>
+<Layout mode="home" through>
+  <section class="relative grid h-dvh place-items-center px-6 portrait:content-start portrait:pt-[12dvh]">
+    <div class="scrim py-14 text-center sm:px-24 sm:py-20">
+      <p class="mb-4 font-mono text-xs tracking-widest text-dim uppercase">you are inside my brain</p>
+      <h1 data-decode class="font-display text-5xl font-bold tracking-tight whitespace-pre text-fg [text-shadow:0_0_40px_rgb(120_140_255/.45)] sm:text-7xl">Hi, I am Prasad.</h1>
+      <p class="mx-auto mt-5 max-w-xl font-mono text-sm text-balance text-dim">
+        I build low-latency trading systems at Sahi. Rust, Go, Kafka, and lately, brains.
+      </p>
+    </div>
 
-                <ul class="flex flex-row items-center gap-3">
-                    {
-                        SOCIALS.map((social) => (
-                            <li class="flex flex-row items-center gap-1 hover:rotate-12 duration-100 transition-all">
-                                <a
-                                    target="_blank"
-                                    rel="external"
-                                    class={`link text-2xl ${social.css}`}
-                                    href={social.url}
-                                >
-                                    <social.Icon />
-                                </a>
-                            </li>
-                        ))
-                    }
-                </ul>
+    <details id="legend" open class="glass solid absolute bottom-20 left-1/2 w-max max-w-[calc(100vw-3rem)] -translate-x-1/2 bg-[rgb(8_10_20/.9)]! px-4 py-2.5 font-mono text-xs text-dim open:p-4 md:bottom-6 md:left-6 md:max-w-xs md:translate-x-0">
+      <summary class="cursor-pointer text-fg">how to read this</summary>
+      <ul class="mt-3 flex flex-col gap-2">
+        {legend.map(([g, what, means]) => <li class="grid grid-cols-[1.25rem_1fr] gap-2"><span class="text-fg">{g}</span><span><span class="text-fg/80">{what}</span>: {means}</span></li>)}
+      </ul>
+      <p class="mt-3 text-dim/70"><span class="pointer-coarse:hidden">move to stimulate · click empty space for a wave · click a glowing node to enter it</span><span class="hidden pointer-coarse:inline">drag to stimulate · tap empty space for a wave · tap a glowing node to enter it</span></p>
+    </details>
+    <script is:inline>
+      if (!matchMedia("(min-width: 48rem)").matches) document.getElementById("legend").open = false;
+    </script>
 
-                <p class="text-center">
-                    I write code to solve problems (and sometimes just because I
-                    can 😎). I have been telling computers what to do since 2009
-                    (professionally since 2016).
-                </p>
-            </div>
-        </section>
+    <div class="absolute inset-x-0 bottom-6 flex justify-center gap-2 font-mono text-xs md:left-auto md:right-6 md:inset-x-auto">
+      {
+        lobes.map((l) => (
+          <a href={`/posts/${l.id}/`} data-lobe={l.id} class={`lobe-${l.id} glass rounded-full! px-3 py-1.5 text-(--lobe)`}>
+            <span class="mr-2 inline-block size-2 rounded-full bg-(--lobe) shadow-[0_0_10px_var(--lobe)]"></span>{l.id}
+          </a>
+        ))
+      }
+    </div>
+  </section>
 
-        <section class="w-full">
-            <div class="divider">Technologies I use</div>
-            <div class="w-full flex flex-col items-center gap-2">
-                <ul class="flex flex-row items-center gap-3 mt-2">
-                    {
-                        Object.entries(SKILLS).map(([_, v]) => {
-                            return (
-                                <li class="flex flex-row items-center gap-1 text-3xl hover:-translate-y-1 duration-100 transition-all">
-                                    <a
-                                        href={v.href}
-                                        target="_blank"
-                                        rel="external"
-                                    >
-                                        <v.Icon class="bg-slate-200 p-1 rounded-lg" />
-                                    </a>
-                                </li>
-                            );
-                        })
-                    }
-                </ul>
-                <p class="mt-2">
-                    I have also worked with Clojure, Kafka, SvelteKit, Supabase,
-                    and more.
-                </p>
-            </div>
-        </section>
+  <section class="mx-auto max-w-5xl px-6 py-24">
+    <h2 class="font-display text-3xl font-bold">On my mind lately</h2>
+    <p class="mt-2 font-mono text-xs text-dim">the brightest neurons.<span class="pointer-coarse:hidden"> hover one to see where it sits.</span></p>
+    <div class="mt-10 grid gap-4 sm:grid-cols-2">
+      {
+        recent.map((p) => (
+          <a href={urlOf(p)} data-neuron={p.id} class={`lobe-${lobeOf(p)} glass group flex flex-col gap-3 p-6 transition hover:-translate-y-1 hover:border-(--lobe)/50`}>
+            <span class="font-mono text-[11px] text-(--lobe)">{lobeOf(p)} · {p.data.pubDate.toISOString().slice(0, 10)} · {readingMinutes(p)} min</span>
+            <span class="font-display text-xl font-medium text-fg">{p.data.title}</span>
+            <span class="line-clamp-3 text-sm text-dim">{p.data.description}</span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
 
-        <section class="w-full">
-            <div class="divider">Work Experience</div>
-            <div class="w-full flex flex-col gap-2 items-center">
-                <p>I have built tech for the following companies.</p>
+  <section class="mx-auto max-w-5xl px-6 py-12">
+    <h2 class="font-display text-3xl font-bold">Lobes</h2>
+    <div class="mt-10 grid gap-4 sm:grid-cols-3">
+      {
+        lobes.map((l) => (
+          <a href={`/posts/${l.id}/`} data-lobe={l.id} class={`lobe-${l.id} glass flex flex-col gap-2 p-6 transition hover:border-(--lobe)/50`}>
+            <span class="font-mono text-xs text-(--lobe) uppercase">{l.id}</span>
+            <span class="font-display text-xl font-medium">{l.name}</span>
+            <span class="font-mono text-xs text-dim">{l.posts.length} {l.posts.length === 1 ? "post" : "posts"} · latest {l.posts[0]?.data.pubDate.getFullYear()}</span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
 
-                <ul class="w-full flex flex-col gap-2 my-2">
-                    {
-                        WORK.map((job) => (
-                            <li>
-                                <a
-                                    class="flex flex-row items-center gap-4 p-2 rounded-md hover:bg-base-300 px-4"
-                                    href={job.href}
-                                    target={job.external ? "_blank" : "_self"}
-                                >
-                                    <Image
-                                        src={job.logo}
-                                        alt={job.company}
-                                        class="w-10 h-10"
-                                    />
-                                    <div class="flex flex-col">
-                                        <span class="font-bold">
-                                            {job.company}
-                                        </span>
 
-                                        <div class="flex flex-row items-center gap-2">
-                                            <span>{job.role}</span>
-                                            <span class="text-sm">
-                                                ({job.duration})
-                                            </span>
-                                        </div>
-                                    </div>
-                                </a>
-                            </li>
-                        ))
-                    }
-                </ul>
-            </div>
-        </section>
-    </main>
+
+  <section id="about" class="mx-auto max-w-5xl scroll-mt-20 px-6 py-24">
+    <div class="glass solid grid gap-10 p-8 md:grid-cols-[1fr_1.2fr] md:p-10">
+      <div class="flex flex-col gap-5">
+        <img src={AVATAR} alt="Prasad" class="size-20 rounded-full ring-1 ring-white/15" />
+        <h2 class="font-display text-3xl font-bold">About</h2>
+        <p class="text-dim">
+          I write code to solve problems, and sometimes just because I can. I have been telling computers what to do since 2009, professionally for {EXPERIENCE} years.
+        </p>
+        <p class="flex flex-wrap gap-2 font-mono text-xs">
+          {SKILLS.map((s) => <span class="rounded-full border border-white/10 px-2.5 py-1 text-dim">{s}</span>)}
+        </p>
+        <p class="flex flex-wrap gap-4 font-mono text-sm">
+          {SOCIALS.map((s) => <a href={s.url} target="_blank" rel="external" class="text-dim hover:text-fg">{s.label} ↗</a>)}
+        </p>
+      </div>
+      <ul class="flex flex-col gap-1">
+        {
+          WORK.map((job) => (
+            <li>
+              <a href={job.href} target={job.href.startsWith("/") ? "_self" : "_blank"} class="flex items-center gap-4 rounded-xl p-3 transition-colors hover:bg-white/5">
+                <Image src={job.logo} alt={job.company} class="size-10 rounded-lg bg-white/90 object-contain p-1" />
+                <span class="flex flex-col">
+                  <span class="font-display font-medium">{job.company}</span>
+                  <span class="text-sm text-dim">{job.role} · <span class="font-mono text-xs">{job.duration}</span></span>
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
 </Layout>

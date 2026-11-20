@@ -1,34 +1,24 @@
-import { defineConfig, passthroughImageService } from 'astro/config';
-import mdx from '@astrojs/mdx';
-import sitemap from '@astrojs/sitemap';
-import Icons from 'unplugin-icons/vite';
-import tailwind from "@astrojs/tailwind";
-import prefetch from "@astrojs/prefetch";
+import { defineConfig, passthroughImageService } from "astro/config";
+import mdx from "@astrojs/mdx";
+import sitemap from "@astrojs/sitemap";
+import tailwindcss from "@tailwindcss/vite";
 
-import cloudflare from "@astrojs/cloudflare";
-
-// https://astro.build/config
 export default defineConfig({
-  site: 'https://spy16.in',
+  site: "https://spy16.in",
   prefetch: true,
-  integrations: [mdx(), sitemap(), tailwind(), prefetch()],
+  integrations: [mdx(), sitemap()],
   image: {
-    service: passthroughImageService()
+    service: passthroughImageService(),
   },
   vite: {
-    plugins: [Icons({
-      compiler: 'astro',
-      autoInstall: true
-    })]
+    plugins: [tailwindcss()],
   },
   markdown: {
     gfm: true,
     smartypants: true,
     shikiConfig: {
       wrap: false,
-      theme: "rose-pine-dawn"
-    }
+      theme: "vesper",
+    },
   },
-  output: "hybrid",
-  adapter: cloudflare()
 });

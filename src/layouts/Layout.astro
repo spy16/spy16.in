@@ -1,103 +1,131 @@
 ---
-import { ViewTransitions } from "astro:transitions";
-import "@fontsource/chilanka";
+import { ClientRouter } from "astro:transitions";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/space-grotesk";
+import "@fontsource-variable/jetbrains-mono";
+import interFont from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url";
+import displayFont from "@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2?url";
+import monoFont from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url";
 
 import "../styles/global.css";
-import { TWITTER_HANDLE } from "../consts";
-import Header from "../components/Header.astro";
+import { SITE_DESCRIPTION, SITE_TITLE, SOCIALS, TWITTER_HANDLE } from "../consts";
+import Brain from "../components/Brain.astro";
 
 interface Props {
-	title?: string;
-	description?: string;
-	noHeader?: boolean;
+  title?: string;
+  description?: string;
+  mode?: "home" | "index" | "post" | "page";
+  focus?: string;
+  through?: boolean;
 }
 
-const props = Astro.props;
+const { mode = "page", focus, through = false, ...props } = Astro.props;
 
-const title = props.title ? `${props.title} - spy16.in` : "spy16.in";
-const description = props.description || "Poor attempts to convey my thoughts";
+const title = props.title ? `${props.title} · ${SITE_TITLE}` : SITE_TITLE;
+const description = props.description || SITE_DESCRIPTION;
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const siteImageUrl = new URL("/logo.png", Astro.site);
-
-// wireframe, cupcake
-const curTheme = "lofi"; // cupcake when it's day.
+const path = Astro.url.pathname;
+const links = [
+  { label: "posts", href: "/posts/" },
+  { label: "about", href: "/#about" },
+  { label: "rss", href: "/rss.xml" },
+];
 ---
 
 <!doctype html>
 <html lang="en">
-	<head>
-		<!-- Global Metadata -->
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width,initial-scale=1" />
-		<link rel="icon" type="image/png" href="/favicon.png" />
-		<meta name="generator" content={Astro.generator} />
-		<meta name="robots" content="follow, index" />
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="alternate" type="application/rss+xml" title={SITE_TITLE} href="/rss.xml" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="robots" content="follow, index" />
+    <meta name="theme-color" content="#05060c" />
+    <link rel="canonical" href={canonicalURL} />
 
-		<!-- Canonical URL -->
-		<link rel="canonical" href={canonicalURL} />
+    <title>{title}</title>
+    <meta name="title" content={title} />
+    <meta name="description" content={description} />
 
-		<!-- Primary Meta Tags -->
-		<title>{title}</title>
-		<meta name="title" content={title} />
-		<meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={Astro.url} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={siteImageUrl} />
 
-		<!-- Open Graph / Facebook -->
-		<meta property="og:type" content="website" />
-		<meta property="og:url" content={Astro.url} />
-		<meta property="og:title" content={title} />
-		<meta property="og:description" content={description} />
-		<meta property="og:image" content={siteImageUrl} />
+    <meta property="twitter:card" content="summary" />
+    <meta property="twitter:url" content={Astro.url} />
+    <meta property="twitter:title" content={title} />
+    <meta property="twitter:description" content={description} />
+    <meta property="twitter:image" content={siteImageUrl} />
+    <meta property="twitter:creator" content={TWITTER_HANDLE} />
 
-		<!-- Twitter -->
-		<meta property="twitter:card" content="summary" />
-		<meta property="twitter:url" content={Astro.url} />
-		<meta property="twitter:title" content={title} />
-		<meta property="twitter:description" content={description} />
-		<meta property="twitter:image" content={siteImageUrl} />
-		<meta property="twitter:creator" content={TWITTER_HANDLE} />
+    {[interFont, displayFont, monoFont].map((href) => <link rel="preload" href={href} as="font" type="font/woff2" crossorigin />)}
 
-		<ViewTransitions />
+    <ClientRouter />
 
-		<script
-			defer
-			is:inline
-			type="text/javascript"
-			src="https://api.pirsch.io/pirsch-extended.js"
-			id="pirschextendedjs"
-			data-code="rOdoEa5tg2DPkb3UctA9foeQmue2YpPH"></script>
-	</head>
+    <script
+      defer
+      is:inline
+      type="text/javascript"
+      src="https://api.pirsch.io/pirsch-extended.js"
+      id="pirschextendedjs"
+      data-code="rOdoEa5tg2DPkb3UctA9foeQmue2YpPH"></script>
+  </head>
 
-	<body>
-		<div
-			class="w-full h-full min-h-[100dvh] flex flex-col"
-			data-theme={curTheme}
-		>
-			<div
-				class="absolute top-0 left-0 w-full h-full min-h-screen m-0 p-0"
-			>
-				<div id="stars"></div>
-			</div>
+  <body data-mode={mode} data-focus={focus} class="min-h-dvh font-sans antialiased">
+    <Brain />
 
-			<div
-				class="flex flex-col gap-2 relative bg-transparent z-10 px-4 py-4"
-			>
-				{!props.noHeader && <Header />}
+    <nav class="pointer-events-none fixed inset-x-0 top-0 z-20 flex items-center justify-between bg-linear-to-b from-ink/90 to-transparent px-5 pt-4 pb-8 font-mono text-sm *:pointer-events-auto sm:px-8">
+      <a href="/" class="group flex items-center gap-2 text-fg">
+        <span class="size-2 rounded-full bg-engineering shadow-[0_0_12px_var(--color-engineering)] group-hover:animate-ping"></span>
+        spy16.in
+      </a>
+      <span class="flex gap-5">
+        {
+          links.map((l) => (
+            <a href={l.href} class:list={["transition-colors hover:text-fg", path.startsWith(l.href) && l.href !== "/#about" ? "text-fg" : "text-dim"]}>
+              {l.label}
+            </a>
+          ))
+        }
+      </span>
+    </nav>
 
-				<div class="my-12">
-					<slot />
-				</div>
-			</div>
-		</div>
+    <div class:list={["page relative z-10", { through }]}>
+      <slot />
 
-		<script>
-			import { isLoading } from "../components/states";
+      <footer class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-12 font-mono text-xs text-dim">
+        <span>© {new Date().getFullYear()} Prasad · spy16.in</span>
+        <span class="flex gap-4">
+          {SOCIALS.map((s) => <a href={s.url} target="_blank" rel="external" class="hover:text-fg">{s.label}</a>)}
+        </span>
+      </footer>
+    </div>
 
-			document.addEventListener("astro:before-preparation", () => {
-				isLoading.set(true);
-			});
-			document.addEventListener("astro:page-load", () => {
-				isLoading.set(false);
-			});
-		</script>
-	</body>
+    <script>
+      const GLYPHS = "01<>/{}[]#*+=~";
+
+      document.addEventListener("astro:page-load", () => {
+        if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        document.querySelectorAll<HTMLElement>("[data-decode]").forEach((el) => {
+          const text = el.textContent ?? "";
+          const hold = Object.assign(document.createElement("span"), { textContent: text });
+          const scramble = document.createElement("span");
+          hold.style.visibility = "hidden";
+          scramble.setAttribute("aria-hidden", "true");
+          scramble.style.cssText = "position:absolute;inset:0;overflow:hidden";
+          el.style.position = "relative";
+          el.replaceChildren(hold, scramble);
+          let f = 0;
+          const iv = setInterval(() => {
+            scramble.textContent = [...text].map((ch, i) => (i < f / 2 || ch === " " ? ch : GLYPHS[(Math.random() * GLYPHS.length) | 0])).join("");
+            if (++f > text.length * 2) { clearInterval(iv); el.textContent = text; }
+          }, 40);
+        });
+      });
+    </script>
+  </body>
 </html>

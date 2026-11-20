@@ -1,0 +1,36 @@
+---
+import { conceptsOf, lobeOf, readingMinutes, urlOf, type Post } from "../lib/brain";
+
+interface Props {
+  posts: Post[];
+}
+
+const { posts } = Astro.props;
+---
+
+<ul class="flex flex-col">
+  {
+    posts.map((p) => (
+      <li class={`lobe-${lobeOf(p)}`}>
+        <a
+          href={urlOf(p)}
+          data-neuron={p.id}
+          class="group grid grid-cols-[5.5rem_1fr] gap-4 border-b border-white/5 py-5 transition-colors hover:bg-white/[.03] sm:grid-cols-[7rem_1fr] sm:px-3"
+        >
+          <span class="pt-1 font-mono text-xs text-dim">{p.data.pubDate.toISOString().slice(0, 10)}</span>
+          <span class="flex flex-col gap-1.5">
+            <span class="flex items-start gap-2 font-display text-lg font-medium text-fg transition-colors group-hover:text-(--lobe)">
+              <span class="mt-[0.7em] size-1.5 shrink-0 rounded-full bg-(--lobe) shadow-[0_0_8px_var(--lobe)]" />
+              {p.data.title}
+            </span>
+            <span class="line-clamp-2 text-sm text-dim">{p.data.description}</span>
+            <span class="flex flex-wrap gap-x-3 font-mono text-[11px] text-dim/70">
+              <span>{readingMinutes(p)} min</span>
+              {conceptsOf(p).map((c) => <span>#{c}</span>)}
+            </span>
+          </span>
+        </a>
+      </li>
+    ))
+  }
+</ul>

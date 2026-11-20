@@ -1,40 +1,51 @@
 ---
-import { type CollectionEntry } from "astro:content";
-
 import Layout from "./Layout.astro";
+import { conceptsOf, lobeOf, readingMinutes, urlOf, type Post } from "../lib/brain";
 
-type Props = CollectionEntry<"blog">;
+interface Props {
+  post: Post;
+  related: Post[];
+}
 
-const post = Astro.props;
-const { title, description, pubDate, tags } = post.data;
+const { post, related } = Astro.props;
+const { title, description, pubDate } = post.data;
+const lobe = lobeOf(post);
 ---
 
-<Layout title={title} description={description}>
-    <main class="w-full max-w-screen-md mx-auto flex flex-col">
-        <header class="flex flex-col gap-4 items-center">
-            <h1 class="text-2xl font-bold tracking-wide">{title}</h1>
-            <p class="text-sm">
-                Published on <span class="font-medium"
-                    >{pubDate.toDateString()}</span
-                >
-            </p>
+<Layout title={title} description={description} mode="post" focus={post.id}>
+  <div class={`lobe-${lobe} read-progress fixed inset-x-0 top-0 z-30 h-0.5 bg-(--lobe) shadow-[0_0_10px_var(--lobe)]`}></div>
 
-            <ul class="flex flex-row gap-1 flex-wrap">
-                {
-                    tags &&
-                        tags.map((tag) => (
-                            <li class="badge badge-outline badge-sm">{tag}</li>
-                        ))
-                }
-            </ul>
-        </header>
+  <main class={`lobe-${lobe} mx-auto max-w-3xl px-5 pt-28 pb-12 sm:px-6`}>
+    <a href={`/posts/${lobe}/`} class="font-mono text-xs text-(--lobe) uppercase hover:underline">← {lobe} lobe</a>
+    <h1 class="mt-4 font-display text-4xl leading-tight font-bold text-balance sm:text-5xl">{title}</h1>
+    <p class="mt-5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-dim">
+      <span>{pubDate.toISOString().slice(0, 10)}</span>
+      <span>{readingMinutes(post)} min read</span>
+      {conceptsOf(post).map((c) => <span>#{c}</span>)}
+    </p>
 
-        <article
-            class="mt-12 max-w-none prose dark:prose-invert
-		prose-h1:font-bold prose-h1:text-xl prose-lg
-		prose-a:text-blue-600 prose-p:text-justify prose-img:rounded-xl prose-img:mx-auto prose-img:border prose-img:p-4"
-        >
-            <slot />
-        </article>
-    </main>
+    <article
+      class="glass mt-10 prose max-w-none bg-[rgb(8_10_20/.88)]! p-6 prose-invert prose-lg sm:p-10
+        prose-headings:font-display prose-a:text-(--lobe) prose-img:mx-auto prose-img:rounded-xl"
+    >
+      <slot />
+    </article>
+
+    {
+      related.length > 0 && (
+        <section class="mt-16">
+          <h2 class="font-display text-2xl font-bold">Connected thoughts</h2>
+          <p class="mt-1 font-mono text-xs text-dim">neurons this one fires into: shared ideas first, then neighbours in time.</p>
+          <div class="mt-6 grid gap-4 sm:grid-cols-3">
+            {related.map((p) => (
+              <a href={urlOf(p)} data-neuron={p.id} class={`lobe-${lobeOf(p)} glass flex flex-col gap-2 p-5 transition hover:-translate-y-1 hover:border-(--lobe)/50`}>
+                <span class="font-mono text-[11px] text-(--lobe)">{lobeOf(p)} · {p.data.pubDate.getFullYear()}</span>
+                <span class="font-display font-medium">{p.data.title}</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      )
+    }
+  </main>
 </Layout>
