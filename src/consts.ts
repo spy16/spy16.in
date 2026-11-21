@@ -6,7 +6,7 @@ import docutalkLogo from "./assets/docutalk.png";
 import directiLogo from "./assets/directi.png";
 
 export const SITE_TITLE = "spy16.in";
-export const SITE_DESCRIPTION = "Prasad's brain, mapped: posts on engineering and AI.";
+export const SITE_DESCRIPTION = "A small corner of Prasad's brain: posts on engineering and AI.";
 export const TWITTER_HANDLE = "@spy16x";
 const EMAIL = "shiv.ylp@gmail.com";
 
