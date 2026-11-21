@@ -1,0 +1,86 @@
+---
+import "./widget.css";
+---
+
+<div class="w not-prose" data-widget="reuse">
+  <span class="w-label">One box, two roads · <code>L = a × a</code></span>
+  <div class="w-btns" role="group" aria-label="How a.grad is updated">
+    <button class="w-btn" data-mode="add" aria-pressed="true">a.grad += (add)</button>
+    <button class="w-btn" data-mode="set" aria-pressed="false">a.grad = (overwrite)</button>
+  </div>
+  <div class="w-fig"><svg style="min-width: 480px" role="img" aria-label="Graph where a feeds both inputs of a multiply box"></svg></div>
+  <div class="w-explain" aria-live="polite"></div>
+  <div class="w-btns"><button class="w-btn" data-act="step">Step backward</button><button class="w-btn ghost" data-act="reset">Reset</button></div>
+  <div class="w-controls">
+    <label class="w-ctl">a = <b data-out="a"></b><input data-in="a" type="range" min="-4" max="4" step="0.5" value="3" /></label>
+  </div>
+</div>
+
+<script>
+  import * as d3 from "d3";
+  import { $, fmt, mountAll } from "./widget";
+
+  const BW = 150, BH = 70;
+  const ROADS = [
+    { d: "M180,92 C270,10 290,10 380,92", label: "left input", ly: 34 },
+    { d: "M180,108 C270,190 290,190 380,108", label: "right input", ly: 176 },
+  ];
+  const BOXES = [{ k: "a", x: 30, name: "a" }, { k: "L", x: 380, name: "L = a × a" }] as const;
+
+  mountAll("reuse", (root) => {
+    const svg = d3.select($(root, "svg")).attr("viewBox", "0 0 560 200");
+    const roadSel = svg.append("g").selectAll("path").data(ROADS).join("path").attr("class", "edge").attr("d", (r) => r.d);
+    svg.append("g").selectAll("text").data(ROADS).join("text").attr("class", "svglabel").attr("text-anchor", "middle").attr("x", 280).attr("y", (r) => r.ly).text((r) => r.label);
+    const boxSel = svg.append("g").selectAll("g").data(BOXES).join("g")
+      .attr("class", (n) => "node" + (n.k === "a" ? " leaf" : "")).attr("transform", (n) => `translate(${n.x},65)`);
+    boxSel.append("rect").attr("width", BW).attr("height", BH).attr("rx", 5);
+    boxSel.append("text").attr("class", "name").attr("x", 12).attr("y", 22).text((n) => n.name);
+    boxSel.append("text").attr("class", "val").attr("x", 12).attr("y", 43);
+    boxSel.append("text").attr("class", "g").attr("x", 12).attr("y", 61);
+
+    const ain = $<HTMLInputElement>(root, '[data-in="a"]'), explain = $(root, ".w-explain"), stepBtn = $<HTMLButtonElement>(root, '[data-act="step"]');
+    const modeBtns = root.querySelectorAll<HTMLButtonElement>("[data-mode]");
+    let mode = "add", step = 0, grad: Record<string, number> = {};
+
+    const render = (road: number, active: string | null) => {
+      const a = +ain.value, v: Record<string, number> = { a, L: a * a };
+      $(root, '[data-out="a"]').textContent = fmt(a, 1);
+      boxSel.select(".val").text((n) => `value ${fmt(v[n.k])}`);
+      boxSel.select(".g").text((n) => `grad  ${n.k in grad ? fmt(grad[n.k]) : "?"}`);
+      boxSel.classed("active", (n) => n.k === active);
+      roadSel.classed("active", (_, i) => i === road);
+    };
+
+    const reset = () => {
+      step = 0; grad = {};
+      modeBtns.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+      explain.innerHTML = `Mode: <b>${mode === "add" ? "a.grad += road" : "a.grad = road"}</b>. Press <b>Step backward</b>.`;
+      stepBtn.disabled = false;
+      render(-1, null);
+    };
+
+    stepBtn.addEventListener("click", () => {
+      const a = +ain.value;
+      if (step === 0) {
+        grad.L = 1; step++;
+        explain.innerHTML = "Start at the end: <b>L.grad = 1</b>.";
+        render(-1, "L"); return;
+      }
+      const i = step - 1, contrib = grad.L * a;
+      grad.a = mode === "add" ? (grad.a ?? 0) + contrib : contrib;
+      explain.innerHTML = `Road ${i + 1}, the <b>${ROADS[i].label}</b>. × swaps: this input gets upstream × the other input = ${fmt(grad.L)} × ${fmt(a)} = ${fmt(contrib)}.<br>
+        <b>a.grad ${mode === "add" ? "+=" : "="} ${fmt(contrib)}</b> → a.grad is now <b>${fmt(grad.a)}</b>`;
+      step++; render(i, "a");
+      if (step > ROADS.length) {
+        const h = 1e-4, nudge = ((a + h) ** 2 - a * a) / h, ok = Math.abs(nudge - grad.a) < 1e-2;
+        explain.innerHTML += `<br><br>Nudge check: (L(a + 0.0001) − L(a)) / 0.0001 = <b>${fmt(nudge, 4)}</b>. Backprop says <b>${fmt(grad.a, 4)}</b>. ` +
+          (ok ? "They match, and it's the slope of x², which is 2x." : "They don't match. The second road wiped out the first.");
+        stepBtn.disabled = true;
+      }
+    });
+    modeBtns.forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode!; reset(); }));
+    $(root, '[data-act="reset"]').addEventListener("click", reset);
+    ain.addEventListener("input", reset);
+    reset();
+  });
+</script>

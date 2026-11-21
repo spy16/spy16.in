@@ -1,0 +1,85 @@
+---
+import "./widget.css";
+---
+
+<div class="w not-prose" data-widget="tape">
+  <span class="w-label">The tape · <code>tape.backward(L)</code></span>
+  <div class="w-fig"><svg style="min-width: 640px" role="img" aria-label="Tape of seven nodes with arcs pointing from each operation to its earlier inputs"></svg></div>
+  <div class="w-explain" aria-live="polite"></div>
+  <div class="w-btns"><button class="w-btn" data-act="step">Step backward</button><button class="w-btn ghost" data-act="reset">Reset</button></div>
+</div>
+
+<script>
+  import * as d3 from "d3";
+  import { $, fmt, mountAll } from "./widget";
+
+  type Slot = { name: string; op: "Leaf" | "Add" | "Mul"; v: number; ins?: [number, number] };
+  const TAPE: Slot[] = [
+    { name: "a", op: "Leaf", v: 2 }, { name: "b", op: "Leaf", v: -3 }, { name: "c", op: "Leaf", v: 10 }, { name: "f", op: "Leaf", v: -2 },
+    { name: "e", op: "Mul", v: 0, ins: [0, 1] }, { name: "d", op: "Add", v: 0, ins: [4, 2] }, { name: "L", op: "Mul", v: 0, ins: [5, 3] },
+  ];
+  TAPE.forEach((n) => {
+    if (!n.ins) return;
+    const [p, q] = n.ins.map((i) => TAPE[i].v);
+    n.v = n.op === "Mul" ? p * q : p + q;
+  });
+  const SW = 96, SG = 10, SY = 120, SH = 86, sx = (i: number) => 12 + i * (SW + SG);
+
+  mountAll("tape", (root) => {
+    const svg = d3.select($(root, "svg")).attr("viewBox", `0 0 ${sx(TAPE.length) + 2} 220`);
+    const arcs = TAPE.flatMap((n, i) => (n.ins ?? []).map((j) => ({ from: i, to: j })));
+    const arcSel = svg.append("g").selectAll("path").data(arcs).join("path").attr("class", "edge")
+      .attr("d", (a) => {
+        const x1 = sx(a.from) + SW / 2, x2 = sx(a.to) + SW / 2, h = 26 + Math.abs(a.from - a.to) * 16;
+        return `M${x1},${SY} C${x1},${SY - h} ${x2},${SY - h} ${x2},${SY}`;
+      });
+    svg.append("g").selectAll("path").data(arcs).join("path").attr("fill", "var(--color-dim)")
+      .attr("d", (a) => { const x = sx(a.to) + SW / 2; return `M${x - 4},${SY - 8} L${x + 4},${SY - 8} L${x},${SY - 1} Z`; });
+    const slotSel = svg.append("g").selectAll("g").data(TAPE).join("g")
+      .attr("class", (n) => "node" + (n.op === "Leaf" ? " leaf" : "")).attr("transform", (_, i) => `translate(${sx(i)},${SY})`);
+    slotSel.append("rect").attr("width", SW).attr("height", SH).attr("rx", 5);
+    slotSel.append("text").attr("class", "name").attr("x", 8).attr("y", 18).text((n, i) => `[${i}] ${n.name}`);
+    slotSel.append("text").attr("class", "svglabel").attr("x", 8).attr("y", 36).text((n) => (n.ins ? `${n.op}(${n.ins.join(", ")})` : "Leaf"));
+    slotSel.append("text").attr("class", "val").attr("x", 8).attr("y", 56).text((n) => fmt(n.v));
+    slotSel.append("text").attr("class", "g").attr("x", 8).attr("y", 75);
+
+    const explain = $(root, ".w-explain"), stepBtn = $<HTMLButtonElement>(root, '[data-act="step"]');
+    let grad: number[] | null = null, cur: number | null = null;
+
+    const render = () => {
+      slotSel.select(".g").text((_, i) => (grad ? `g ${fmt(grad[i])}` : "g ?"));
+      slotSel.classed("active", (_, i) => i === cur);
+      arcSel.classed("active", (a) => a.from === cur);
+    };
+
+    const reset = () => {
+      grad = null; cur = null;
+      explain.innerHTML = "The forward pass pushed seven nodes. Press <b>Step backward</b> to run <code>tape.backward(L)</code>.";
+      stepBtn.disabled = false;
+      render();
+    };
+
+    stepBtn.addEventListener("click", () => {
+      if (grad === null) {
+        grad = TAPE.map(() => 0); grad[6] = 1;
+        explain.innerHTML = "Zero every grad, then <b>nodes[6].grad = 1</b>. Now walk <code>for i in (0..=6).rev()</code>.";
+        render(); return;
+      }
+      cur = cur === null ? 6 : cur - 1;
+      const n = TAPE[cur], g = grad[cur];
+      if (!n.ins) {
+        explain.innerHTML = `<b>i = ${cur}</b>, <code>Op::Leaf</code>: no inputs, nothing to pass back. ${n.name}.grad stays <b>${fmt(g)}</b>.`;
+      } else {
+        const [p, q] = n.ins;
+        if (n.op === "Add") { grad[p] += g; grad[q] += g; } else { grad[p] += g * TAPE[q].v; grad[q] += g * TAPE[p].v; }
+        const rhs = (other: number) => (n.op === "Add" ? fmt(g) : `${fmt(g)} × ${fmt(TAPE[other].v)}`);
+        explain.innerHTML = `<b>i = ${cur}</b>, <code>Op::${n.op}(${p}, ${q})</code>:<br>
+          <code>nodes[${p}].grad += ${rhs(q)}</code> → <b>${fmt(grad[p])}</b> &nbsp;·&nbsp; <code>nodes[${q}].grad += ${rhs(p)}</code> → <b>${fmt(grad[q])}</b>`;
+      }
+      if (cur === 0) { stepBtn.disabled = true; explain.innerHTML += "<br>Reached slot 0. Done."; }
+      render();
+    });
+    $(root, '[data-act="reset"]').addEventListener("click", reset);
+    reset();
+  });
+</script>

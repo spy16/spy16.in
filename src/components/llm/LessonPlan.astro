@@ -1,0 +1,33 @@
+---
+import "./widget.css";
+import { LESSONS, SERIES } from "./lessons";
+import { getSeries, urlOf } from "../../lib/brain";
+
+const published = new Map((await getSeries(SERIES)).map((p) => [p.data.part, urlOf(p)]));
+---
+
+<div class="w not-prose">
+  <span class="w-label">Lesson plan</span>
+  <div class="w-fig">
+    <table class="w-left" style="min-width: 600px">
+      <thead><tr><th>part</th><th>lesson</th><th>concepts</th><th>what we build in Rust</th></tr></thead>
+      <tbody>
+        {
+          LESSONS.map((l) => {
+            const url = published.get(l.part);
+            return (
+              <tr class="align-top">
+                <td>{l.part}</td>
+                <td style="white-space:nowrap">
+                  {url ? <a href={url} class="text-(--lobe) underline underline-offset-2">{l.title}</a> : <span class="text-dim">{l.title}</span>}
+                </td>
+                <td style="font-family:var(--font-sans)">{l.concepts}</td>
+                <td style="font-family:var(--font-sans)">{l.builds}</td>
+              </tr>
+            );
+          })
+        }
+      </tbody>
+    </table>
+  </div>
+</div>

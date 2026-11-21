@@ -1,0 +1,117 @@
+---
+import "./widget.css";
+---
+
+<div class="w not-prose" data-widget="backprop">
+  <span class="w-label">Backprop · <code>L = (a × b + c) × f</code></span>
+  <div class="w-fig"><svg style="min-width: 600px" role="img" aria-label="Computation graph for L = (a*b + c) * f"></svg></div>
+  <div class="w-explain" aria-live="polite"></div>
+  <div class="w-btns"><button class="w-btn" data-act="step">Step backward</button><button class="w-btn ghost" data-act="reset">Reset</button></div>
+  <div class="w-controls">
+    <label class="w-ctl">a = <b data-out="a"></b><input data-in="a" type="range" min="-5" max="5" step="0.5" value="2" /></label>
+    <label class="w-ctl">b = <b data-out="b"></b><input data-in="b" type="range" min="-5" max="5" step="0.5" value="-3" /></label>
+    <label class="w-ctl">c = <b data-out="c"></b><input data-in="c" type="range" min="-5" max="10" step="0.5" value="10" /></label>
+    <label class="w-ctl">f = <b data-out="f"></b><input data-in="f" type="range" min="-5" max="5" step="0.5" value="-2" /></label>
+  </div>
+  <div data-check hidden>
+    <span class="w-label">Check by nudging each input by <code>h = 0.0001</code></span>
+    <div class="w-fig"><table><thead><tr><th>input</th><th>backprop grad</th><th>(L(x+h) − L(x)) / h</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<script>
+  import * as d3 from "d3";
+  import { $, fmt, mountAll } from "./widget";
+
+  type Key = "a" | "b" | "c" | "f" | "e" | "d" | "L";
+  type Node = { name: string; x: number; y: number; op?: "×" | "+"; ins?: [Key, Key] };
+  const BW = 150, BH = 70;
+  const N: Record<Key, Node> = {
+    a: { name: "a", x: 20, y: 20 },
+    b: { name: "b", x: 20, y: 120 },
+    c: { name: "c", x: 20, y: 230 },
+    e: { name: "e = a × b", x: 230, y: 70, op: "×", ins: ["a", "b"] },
+    f: { name: "f", x: 230, y: 300 },
+    d: { name: "d = e + c", x: 440, y: 150, op: "+", ins: ["e", "c"] },
+    L: { name: "L = d × f", x: 640, y: 225, op: "×", ins: ["d", "f"] },
+  };
+  const LEAVES = ["a", "b", "c", "f"] as const;
+  const ORDER: Key[] = ["L", "d", "e"];
+
+  mountAll("backprop", (root) => {
+    const inp = (k: string) => $<HTMLInputElement>(root, `[data-in="${k}"]`);
+    const forward = (over: Partial<Record<Key, number>> = {}) => {
+      const v = {} as Record<Key, number>;
+      LEAVES.forEach((k) => (v[k] = over[k] ?? +inp(k).value));
+      v.e = v.a * v.b; v.d = v.e + v.c; v.L = v.d * v.f;
+      return v;
+    };
+
+    const svg = d3.select($(root, "svg")).attr("viewBox", "0 0 810 390");
+    const edges = (Object.keys(N) as Key[]).flatMap((k) => (N[k].ins ?? []).map((i) => ({ from: i, to: k })));
+    const link = d3.linkHorizontal<{ source: [number, number]; target: [number, number] }, [number, number]>().x((p) => p[0]).y((p) => p[1]);
+    const edgeSel = svg.append("g").selectAll("path").data(edges).join("path").attr("class", "edge")
+      .attr("d", (e) => link({ source: [N[e.from].x + BW, N[e.from].y + BH / 2], target: [N[e.to].x, N[e.to].y + BH / 2] }));
+    const nodeSel = svg.append("g").selectAll("g").data(Object.keys(N) as Key[]).join("g")
+      .attr("class", (k) => "node" + (N[k].op ? "" : " leaf")).attr("transform", (k) => `translate(${N[k].x},${N[k].y})`);
+    nodeSel.append("rect").attr("width", BW).attr("height", BH).attr("rx", 5);
+    nodeSel.append("text").attr("class", "name").attr("x", 12).attr("y", 22).text((k) => N[k].name);
+    nodeSel.append("text").attr("class", "val").attr("x", 12).attr("y", 43);
+    nodeSel.append("text").attr("class", "g").attr("x", 12).attr("y", 61);
+
+    const explain = $(root, ".w-explain"), stepBtn = $<HTMLButtonElement>(root, '[data-act="step"]'), check = $(root, "[data-check]");
+    let val = forward(), grad: Partial<Record<Key, number>> = {}, stepK = 0;
+
+    const render = (active: Key | null) => {
+      nodeSel.select(".val").text((k) => `value ${fmt(val[k])}`);
+      nodeSel.select(".g").text((k) => `grad  ${grad[k] !== undefined ? fmt(grad[k]!) : "?"}`);
+      nodeSel.classed("active", (k) => k === active);
+      edgeSel.classed("active", (e) => e.to === active);
+      LEAVES.forEach((k) => ($(root, `[data-out="${k}"]`).textContent = fmt(+inp(k).value, 1)));
+    };
+
+    const reset = () => {
+      val = forward(); grad = {}; stepK = 0;
+      explain.innerHTML = 'Forward pass done: every box has its <span class="w-fwd">value</span>. No gradients yet. Press <b>Step backward</b>.';
+      stepBtn.disabled = false; check.hidden = true;
+      render(null);
+    };
+
+    const showCheck = () => {
+      const h = 1e-4;
+      const rows = LEAVES.map((k) => [k, grad[k]!, (forward({ [k]: val[k] + h }).L - val.L) / h] as const);
+      d3.select(check).select("tbody").selectAll("tr").data(rows).join("tr")
+        .html((r) => `<td>${r[0]}</td><td class="w-grad">${fmt(r[1], 4)}</td><td>${fmt(r[2], 4)}</td>`);
+      check.hidden = false;
+    };
+
+    stepBtn.addEventListener("click", () => {
+      if (stepK === 0) {
+        grad.L = 1; stepK++;
+        explain.innerHTML = "Start at the end. <b>L.grad = 1</b>: nudge L by a tiny amount and L moves by that same amount. Rate 1.";
+        render("L"); return;
+      }
+      const k = ORDER[stepK - 1], n = N[k], [p, q] = n.ins!, up = grad[k]!;
+      if (n.op === "×") {
+        grad[p] = (grad[p] ?? 0) + up * val[q];
+        grad[q] = (grad[q] ?? 0) + up * val[p];
+        explain.innerHTML = `Box <b>${n.name}</b> is a <b>×</b>. Each input gets <i>upstream grad × the other input</i>.<br>
+          <b>${p}.grad</b> = ${fmt(up)} × ${fmt(val[q])} = <b>${fmt(grad[p]!)}</b> &nbsp;·&nbsp; <b>${q}.grad</b> = ${fmt(up)} × ${fmt(val[p])} = <b>${fmt(grad[q]!)}</b>`;
+      } else {
+        grad[p] = (grad[p] ?? 0) + up;
+        grad[q] = (grad[q] ?? 0) + up;
+        explain.innerHTML = `Box <b>${n.name}</b> is a <b>+</b>. Plus passes the upstream grad through unchanged, because nudging either input by 1 moves the sum by 1.<br>
+          <b>${p}.grad</b> = ${fmt(up)} × 1 = <b>${fmt(grad[p]!)}</b> &nbsp;·&nbsp; <b>${q}.grad</b> = ${fmt(up)} × 1 = <b>${fmt(grad[q]!)}</b>`;
+      }
+      stepK++; render(k);
+      if (stepK > ORDER.length) {
+        stepBtn.disabled = true;
+        explain.innerHTML += "<br><br>Done. Every box now knows how much it pushes L. Check the numbers below.";
+        showCheck();
+      }
+    });
+    $(root, '[data-act="reset"]').addEventListener("click", reset);
+    LEAVES.forEach((k) => inp(k).addEventListener("input", reset));
+    reset();
+  });
+</script>

@@ -1,0 +1,53 @@
+---
+title: "LLM from Scratch #0: The Roadmap"
+description: "A series where we build a GPT from zero in Rust, with no ML libraries: what an LLM does, the eleven lessons, and a map of every concept you need."
+tags: ["llm", "rust", "llm-from-scratch", "machine-learning"]
+pubDate: 2026-11-21
+publish: true
+series: "LLM from Scratch"
+part: 0
+---
+
+import NextTokenLoop from "../../../components/llm/NextTokenLoop.astro";
+import LessonPlan from "../../../components/llm/LessonPlan.astro";
+import ConceptMap from "../../../components/llm/ConceptMap.astro";
+
+In this series we build a GPT from nothing, in Rust, with zero dependencies. No PyTorch, no NumPy, no `ndarray`. We write the random number generator, the tensors, the autograd engine and the transformer ourselves.
+
+Why Rust instead of Python? In Python, one line of PyTorch hides most of what this series is about. Here nothing is hidden. If a gradient flows somewhere, it's because we wrote the line that sends it there.
+
+Every part is interactive. You can drag the knobs, step through backprop one box at a time, and check every gradient by hand.
+
+## What an LLM actually does
+
+An LLM does exactly one thing: **given the text so far, give a probability for every possible next token.**
+
+<NextTokenLoop />
+
+- **Writing** is that, in a loop: pick a token, append it, ask again.
+- **Training** is that, plus a nudge. Say the real next token was " mat", and the model gave it 0.41. The loss is `−log(0.41) = 0.89`. Backprop works out which way each of the 124 million knobs should turn to push 0.41 up, and every knob takes a small step.
+
+Everything in this series serves one of those two loops.
+
+## How each part works
+
+Each part follows the same four steps:
+
+1. **The idea** in plain words, with no symbols you haven't met yet.
+2. **An interactive** to play with until the idea feels obvious.
+3. **A quiz**, with answers hidden until you click.
+4. **The Rust**: we write it, test it against the math, and the next part builds on it.
+
+## The lesson plan
+
+<LessonPlan />
+
+## Every concept, and what depends on what
+
+There are 32 concepts between "what is a derivative" and "a GPT that writes Shakespeare". Click any of them below. Amber lights up everything you need to know first, and blue lights up everything it unlocks. GPT starts out selected, so the amber you see first is the whole series.
+
+<ConceptMap />
+
+The only maths you need before starting is school maths: the dot product, matrix multiplication, `exp` and `log`, and what a probability is. Everything else gets built from the ground up.
+
+The code lives at [github.com/spy16/llm-from-scratch](https://github.com/spy16/llm-from-scratch). Start with [Part 1: Knobs and Nudges](/posts/ai/llm-knobs-and-nudges/).

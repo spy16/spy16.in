@@ -1,0 +1,113 @@
+---
+import "./widget.css";
+import { SERIES } from "./lessons";
+import { getSeries } from "../../lib/brain";
+
+const published = (await getSeries(SERIES)).map((p) => p.data.part ?? 0);
+---
+
+<div class="w w-wide not-prose" data-widget="concepts" data-published={JSON.stringify(published)}>
+  <span class="w-label">Concept map · click a concept</span>
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-dim">
+    <span><i class="mr-1.5 inline-block h-2.5 w-3.5 rounded-sm border border-(--ok) bg-(--ok)/15 align-middle"></i>covered so far</span>
+    <span><i class="mr-1.5 inline-block h-2.5 w-3.5 rounded-sm bg-(--grad) align-middle"></i>needed first</span>
+    <span><i class="mr-1.5 inline-block h-2.5 w-3.5 rounded-sm bg-(--fwd) align-middle"></i>unlocked by it</span>
+  </div>
+  <div class="w-fig"><svg style="min-width: 820px" role="img" aria-label="Concept dependency map from basic math up to GPT"></svg></div>
+  <div class="w-cell gap-2.5! p-4!" aria-live="polite" data-detail></div>
+</div>
+
+<style is:global>
+  .w .cm-e { fill: none; stroke: var(--rule); stroke-width: 1.2; transition: stroke 0.2s, opacity 0.2s; }
+  .w .cm-e.need { stroke: var(--grad); stroke-width: 2.2; }
+  .w .cm-e.unlock { stroke: var(--fwd); stroke-width: 2.2; }
+  .w .cm-e.dim { opacity: 0.25; }
+  .w .cm-n { cursor: pointer; transition: opacity 0.2s; }
+  .w .cm-n rect { fill: rgb(11 14 28); stroke: var(--color-dim); stroke-width: 1.2; }
+  .w .cm-n.covered rect { fill: rgb(111 211 154 / 0.15); stroke: var(--ok); }
+  .w .cm-n text { fill: var(--color-fg); font: 600 12px var(--font-sans); text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .w .cm-n .ls { fill: var(--color-dim); font: 10px var(--font-mono); }
+  .w .cm-n.need rect { stroke: var(--grad); stroke-width: 2.5; }
+  .w .cm-n.unlock rect { stroke: var(--fwd); stroke-width: 2.5; }
+  .w .cm-n.sel rect { stroke: var(--color-fg); stroke-width: 3; }
+  .w .cm-n.dim { opacity: 0.35; }
+  .w .cm-n:focus-visible { outline: none; }
+  .w .cm-n:focus-visible rect { stroke: var(--color-fg); stroke-width: 3; }
+  .w .cm-band { fill: var(--color-dim); font: 600 11px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+  .w .cm-links { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .w .cm-links button { font: 600 0.78rem var(--font-sans); padding: 0.15rem 0.6rem; border-radius: 0.35rem; cursor: pointer; background: transparent; color: var(--color-fg); }
+  .w .cm-links.need button { border: 1px solid var(--grad); }
+  .w .cm-links.unlock button { border: 1px solid var(--fwd); }
+  @media (prefers-reduced-motion: reduce) { .w .cm-e, .w .cm-n { transition: none; } }
+</style>
+
+<script>
+  import * as d3 from "d3";
+  import { BANDS, CONCEPTS, type Concept } from "./lessons";
+  import { $, mountAll } from "./widget";
+
+  type Placed = Concept & { x: number; y: number; w: number };
+  const W = 1000, BH = 104, TOP = 6, PAD = 24, NH = 40;
+
+  const byId: Record<string, Placed> = {};
+  BANDS.forEach(([band], bi) => {
+    const nodes = CONCEPTS.filter((c) => c.band === band), sp = (W - 2 * PAD) / nodes.length;
+    nodes.forEach((c, i) => (byId[c.id] = { ...c, x: PAD + sp * (i + 0.5), y: TOP + bi * BH + 64, w: Math.min(138, sp - 14) }));
+  });
+  const kids: Record<string, string[]> = {};
+  CONCEPTS.forEach((c) => c.deps.forEach((d) => (kids[d] ??= []).push(c.id)));
+  const walk = (id: string, next: (x: string) => string[]) => {
+    const seen = new Set<string>(), st = [...next(id)];
+    while (st.length) { const x = st.pop()!; if (!seen.has(x)) { seen.add(x); st.push(...next(x)); } }
+    return seen;
+  };
+  const needs = (id: string) => walk(id, (x) => byId[x].deps);
+  const unlocks = (id: string) => walk(id, (x) => kids[x] ?? []);
+  const partLabel = (p: number) => (p === 0 ? "school math" : `part ${p}`);
+
+  mountAll("concepts", (root) => {
+    const published = new Set<number>(JSON.parse(root.dataset.published ?? "[]"));
+    const covered = (c: Concept) => c.part > 0 && published.has(c.part);
+    const H = TOP + BANDS.length * BH + 6;
+    const svg = d3.select($(root, "svg")).attr("viewBox", `0 0 ${W} ${H}`);
+    BANDS.forEach(([, title], bi) => {
+      const y = TOP + bi * BH;
+      if (bi) svg.append("line").attr("stroke", "var(--rule)").attr("x1", 0).attr("x2", W).attr("y1", y).attr("y2", y);
+      svg.append("text").attr("class", "cm-band").attr("x", PAD - 8).attr("y", y + 18).text(title);
+    });
+    const edges = CONCEPTS.flatMap((c) => c.deps.map((d) => ({ from: d, to: c.id })));
+    const path = ({ from, to }: { from: string; to: string }) => {
+      const a = byId[from], b = byId[to];
+      if (a.band === b.band) {
+        const lift = 22 + Math.abs(a.x - b.x) * 0.06, y = a.y - NH / 2;
+        return `M${a.x},${y} C${a.x},${y - lift} ${b.x},${y - lift} ${b.x},${y}`;
+      }
+      const y1 = a.y + NH / 2, y2 = b.y - NH / 2, my = (y1 + y2) / 2;
+      return `M${a.x},${y1} C${a.x},${my} ${b.x},${my} ${b.x},${y2}`;
+    };
+    const eSel = svg.append("g").selectAll("path").data(edges).join("path").attr("class", "cm-e").attr("d", path);
+    const nSel = svg.append("g").selectAll("g").data(Object.values(byId)).join("g")
+      .attr("transform", (n) => `translate(${n.x},${n.y})`)
+      .attr("tabindex", 0).attr("role", "button").attr("aria-label", (n) => `${n.label}, ${partLabel(n.part)}`);
+    nSel.append("rect").attr("x", (n) => -n.w / 2).attr("y", -NH / 2).attr("width", (n) => n.w).attr("height", NH).attr("rx", 5);
+    nSel.append("text").attr("y", -6).text((n) => (covered(n) ? "✓ " : "") + n.label);
+    nSel.append("text").attr("class", "ls").attr("y", 10).text((n) => partLabel(n.part));
+
+    const detail = $(root, "[data-detail]");
+    const select = (id: string) => {
+      const N = needs(id), U = unlocks(id), n = byId[id];
+      nSel.attr("class", (d) => "cm-n" + (covered(d) ? " covered" : "") + (d.id === id ? " sel" : N.has(d.id) ? " need" : U.has(d.id) ? " unlock" : " dim"));
+      eSel.attr("class", (e) => "cm-e" + (N.has(e.from) && (N.has(e.to) || e.to === id) ? " need" : U.has(e.to) && (U.has(e.from) || e.from === id) ? " unlock" : " dim"));
+      const btns = (ids: string[]) => ids.map((x) => `<button data-id="${x}">${byId[x].label}</button>`).join("") || '<span class="text-dim">nothing</span>';
+      detail.innerHTML = `<div class="flex flex-wrap items-baseline gap-3"><b class="font-display text-lg">${n.label}</b><span class="w-label">${partLabel(n.part)}${covered(n) ? " · covered" : ""}</span></div>
+        <div class="grid gap-3 sm:grid-cols-2"><div><span class="w-label">What it is</span><p>${n.what}</p></div><div><span class="w-label">Why the LLM needs it</span><p>${n.why}</p></div></div>
+        <div><span class="w-label">Needs directly</span><div class="cm-links need">${btns(n.deps)}</div></div>
+        <div><span class="w-label">Unlocks directly</span><div class="cm-links unlock">${btns(kids[id] ?? [])}</div></div>`;
+      detail.querySelectorAll<HTMLButtonElement>("button[data-id]").forEach((b) => b.addEventListener("click", () => select(b.dataset.id!)));
+    };
+    nSel.on("click", (_, n) => select(n.id)).on("keydown", (e: KeyboardEvent, n) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(n.id); }
+    });
+    select("gpt");
+  });
+</script>

@@ -1,0 +1,241 @@
+---
+title: "LLM from Scratch #1: Knobs and Nudges"
+description: "Derivatives, the chain rule and backpropagation, built up from a single nudge: interactive graphs first, then a tiny autograd engine in Rust."
+tags: ["llm", "rust", "llm-from-scratch", "machine-learning"]
+pubDate: 2026-11-21
+publish: true
+series: "LLM from Scratch"
+part: 1
+---
+
+import SlopeExplorer from "../../../components/llm/SlopeExplorer.astro";
+import BackpropGraph from "../../../components/llm/BackpropGraph.astro";
+import ReuseGraph from "../../../components/llm/ReuseGraph.astro";
+import TapeWalk from "../../../components/llm/TapeWalk.astro";
+import Quiz from "../../../components/llm/Quiz.astro";
+
+Every neural network, GPT included, is one big math expression with knobs on it. Learning means turning the knobs so the error gets smaller. This part is about one question: **which way should I turn each knob, and how hard?**
+
+There's a colour code for the whole series: <span style="color:#78a8ff">blue is values</span>, flowing forward, and <span style="color:#ffb45c">amber is gradients</span>, flowing backward.
+
+## The derivative
+
+Take one knob `x` and an output `f(x) = (x − 2)² + 1`. Think of `f` as the error, which we want to be small.
+
+Nudge `x` by a tiny amount `h`, and the output moves by some amount. Divide the two to get `(f(x+h) − f(x)) / h`. That ratio is the **slope**, also called the **derivative** or **gradient**. It answers one question: *for every 1 unit I move x, how many units does f move?*
+
+Move the sliders below. As `h` shrinks, watch the dashed line (your nudge) close in on the amber line (the true slope).
+
+<SlopeExplorer />
+
+The sign of the slope tells you which way to go. A positive slope means making x bigger makes f bigger, so step x *down*. A negative slope means step x *up*. Either way, you step **against** the slope. That rule is **gradient descent**, and it's all that learning is.
+
+In the second half of the widget, try a learning rate of 0.1, then 0.9, then 1.05. Too small and you crawl. Too big and every step overshoots further than the last.
+
+<Quiz q="f(x) = x². At x = 3 you nudge x up by 0.001. About how much does f change? Which way should x move to make f smaller?">
+
+About **0.006**. You can check it directly: `3.001² = 9.006001`, so f moved by `0.006001`, and dividing by the nudge gives a slope of about 6. In general the slope of x² is 2x. To make f smaller, x should go **down**, because the slope is positive.
+
+A common slip is to jump from 3 to 4 and say "f went from 9 to 16, a change of 7". That 7 is the *average* slope over a stretch where the curve keeps bending. The derivative only cares about tiny nudges.
+
+</Quiz>
+
+## The chain rule
+
+Say `y = 3x` and `z = 2y`. Nudge x by 1 and y moves by 3. y moving by 3 makes z move by 2 × 3 = 6. So z moves **6× as fast** as x.
+
+That's the whole chain rule: **to get the rate from start to end, multiply the rates of each link.** No step ever needs to see the whole expression. Each one only needs to know its own small, local rate.
+
+A neural net is a long chain (really a web) of tiny steps like `+` and `×`. If every tiny step knows its local rate, we can get the gradient of the final error for *every* knob by walking backward and multiplying. That walk is called **backpropagation**.
+
+## Backpropagation
+
+Here's `L = (a × b + c) × f`, split into tiny steps. The forward pass fills in the blue values from left to right. Press **Step backward** to fill in the amber gradients from right to left. Each gradient answers one question: *if I nudge this box up a tiny bit, how much does L move?*
+
+<BackpropGraph />
+
+You only need three local rules:
+
+- **Start at 1.** `L.grad = 1`, because nudging L by some amount moves L by that same amount.
+- **Plus routes.** For `out = x + y`, both inputs get the upstream gradient unchanged.
+- **Times swaps.** For `out = x × y`, x gets upstream × y, and y gets upstream × x.
+
+The table at the bottom of the widget is the honesty check. Nudge each input, rerun the forward pass, and measure how far L moved. If backprop is right, the two columns match. We'll write this exact check as a Rust test.
+
+<Quiz q="L = a × b, with a = 4 and b = −2. What are a.grad and b.grad? What does a.grad mean, in one plain sentence?">
+
+`a.grad = −2` and `b.grad = 4`, because times swaps.
+
+Meaning: **if you nudge a up by a tiny ε, L changes by −2ε.** It's a rate of change. It is not a's "share" or "contribution" to L.
+
+</Quiz>
+
+<Quiz q="c = a + b, then L = c × d. Backprop has already found c.grad = 5. What is a.grad?">
+
+**5.** Plus passes the gradient through unchanged. To check with a nudge: move a by 0.001, then c moves by 0.001, so L moves by 5 × 0.001.
+
+You never needed `d`, because it's already folded into `c.grad`. That's the chain rule at work: each box only looks at the gradient arriving from just above it.
+
+</Quiz>
+
+## One box, two roads
+
+What if one value is used twice? Take `L = a × a`. Box `a` feeds the × box twice, once as the left input and once as the right. Backprop walks each road separately, and each road brings its own gradient back to `a`.
+
+Pick a mode, step through both roads, then compare with the nudge check.
+
+<ReuseGraph />
+
+**Used twice? Add.** Every road out of a box brings a gradient back, and those gradients sum. Overwriting keeps only the last road. That's also why the slope of x² is 2x: two roads, each bringing back x.
+
+This matters a lot for an LLM, because the same weights get used at every position in the text. If gradients overwrite instead of adding, the model silently learns from only one position.
+
+## Why this is the whole game
+
+GPT-2 small has 124 million knobs. Nudging each one separately would take 124 million forward passes per learning step. One backward pass gets all 124 million gradients, for roughly the cost of two forward passes. That one trick is what makes training possible at all.
+
+## Building it in Rust
+
+### Representing the graph
+
+Each box points at its inputs, and one box can feed many others, like `a` above. Rust's ownership rules push back on that kind of shared pointer. There are two classic answers:
+
+| | `Rc<RefCell<Node>>` | **A tape: `Vec<Node>` with index links** |
+|---|---|---|
+| Sharing | refcounts, plus a borrow check at runtime on every access | plain indices into one `Vec` |
+| Mistakes | a bad borrow panics at runtime | nothing to borrow per node |
+| Backward order | sort the graph first | **free**: walk the `Vec` in reverse |
+
+We use the tape. Every value we compute is pushed onto one `Vec`, and an operation stores its inputs as positions in that `Vec`: `Mul(5, 3)` means "slot 5 times slot 3".
+
+Look at the arcs below. **Every arc points left**, because a node can only point at nodes that already existed when it was made. So when we walk from right to left, each node is visited only after every node that uses it, and its gradient is complete by the time we pass it on. No sorting needed.
+
+<TapeWalk />
+
+### The code
+
+The whole engine is about 100 lines. A `Tape` owns the nodes. A `Value` is a small `Copy` handle (a slot number plus a reference to its tape), and that's what lets us write expressions as normal Rust syntax.
+
+```rust
+#[derive(Default)]
+pub struct Tape {
+    nodes: RefCell<Vec<Node>>,
+}
+
+#[derive(Clone, Copy)]
+pub struct Value<'t> {
+    id: usize,
+    tape: &'t Tape,
+}
+
+#[derive(Clone, Copy)]
+struct Node {
+    data: f64,
+    grad: f64,
+    op: Op,
+}
+
+/// Fields are tape indices of the inputs.
+#[derive(Clone, Copy)]
+enum Op {
+    Leaf,
+    Add(usize, usize),
+    Mul(usize, usize),
+}
+```
+
+There's only one `RefCell`, wrapped around the whole tape. Every operation does its forward math and pushes a node:
+
+```rust
+impl<'t> Mul for Value<'t> {
+    type Output = Value<'t>;
+
+    fn mul(self, rhs: Self) -> Value<'t> {
+        self.tape
+            .push(self.data() * rhs.data(), Op::Mul(self.id, rhs.id))
+    }
+}
+```
+
+`backward` is the three rules from above, walked in reverse tape order:
+
+```rust
+pub fn backward(&self, root: Value) {
+    let mut nodes = self.nodes.borrow_mut();
+    for n in nodes.iter_mut() {
+        n.grad = 0.0;
+    }
+    nodes[root.id].grad = 1.0;
+
+    for i in (0..=root.id).rev() {
+        let Node { grad, op, .. } = nodes[i];
+        match op {
+            Op::Leaf => {}
+            Op::Add(a, b) => {
+                nodes[a].grad += grad;
+                nodes[b].grad += grad;
+            }
+            Op::Mul(a, b) => {
+                let (da, db) = (nodes[a].data, nodes[b].data);
+                nodes[a].grad += grad * db;
+                nodes[b].grad += grad * da;
+            }
+        }
+    }
+}
+```
+
+Using it looks just like the graph:
+
+```rust
+let tape = Tape::default();
+let [a, b, c, f] = [2.0, -3.0, 10.0, -2.0].map(|v| tape.leaf(v));
+let l = (a * b + c) * f;   // -8
+tape.backward(l);
+// a.grad() = 6, b.grad() = -4, c.grad() = -2, f.grad() = 4
+```
+
+### Testing against the nudge check
+
+The test is the same table as the one in the widget. Nudge each input, rerun the forward pass on a fresh tape, and compare the measured slope with backprop's answer:
+
+```rust
+#[test]
+fn matches_nudge_check() {
+    let x = [1.5, -0.5, 3.0, 2.5];
+    let tape = Tape::default();
+    let (leaves, l) = expr(&tape, x);
+    tape.backward(l);
+
+    for i in 0..4 {
+        let mut nudged = x;
+        nudged[i] += H;
+        let slope = (expr(&Tape::default(), nudged).1.data() - l.data()) / H;
+        assert!((slope - leaves[i].grad()).abs() < 1e-6, "input {i}");
+    }
+}
+```
+
+<Quiz q="In backward, why copy the node out with `let Node { grad, op, .. } = nodes[i];` instead of keeping a reference to nodes[i] while updating nodes[a]?">
+
+A reference to `nodes[i]` is a shared borrow of the whole `Vec`. Writing `nodes[a].grad += …` while it's alive needs a mutable borrow of the same `Vec`, so the compiler refuses with E0502: *cannot borrow `nodes` as mutable because it is also borrowed as immutable*. `Node` is `Copy`, so copying three small fields out is free and ends the shared borrow straight away.
+
+</Quiz>
+
+<Quiz q="What breaks if you delete the loop that zeroes every grad, then call backward twice on the same tape?">
+
+Every gradient doubles. Backward only ever *adds* with `+=`, which it has to do for reused values. So the second pass piles on top of whatever the first pass left behind. Training loops call backward once per step, so without the reset, gradients would grow with every step.
+
+</Quiz>
+
+<Quiz q="t1.leaf(2.0) + t2.leaf(3.0) compiles, even though the values come from two different tapes. What actually happens?">
+
+The forward value is correct: 5, because each `data()` reads from its own tape. But the new node is pushed onto `t1` with `Op::Add(0, 0)`, and that second `0` meant slot 0 *of t2*. When you call backward on t1, it sends that gradient to t1's slot 0 instead. You get silently wrong gradients, or an index-out-of-bounds panic if the slot doesn't exist on t1. The lifetime `'t` only proves the tape outlives the value. It doesn't prove two values share a tape. A cheap guard is `debug_assert!(std::ptr::eq(self.tape, rhs.tape))`.
+
+</Quiz>
+
+## What's next
+
+We have a working autograd engine with `+` and `×`. Part 2, A Brain Cell, adds a few more operations, builds a neuron and a small network on top of the tape, and runs our first real training loop. The [roadmap](/posts/ai/llm-roadmap/) has the full plan.
+
+The full code is at [github.com/spy16/llm-from-scratch](https://github.com/spy16/llm-from-scratch), in `src/autograd.rs`.

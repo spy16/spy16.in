@@ -1,0 +1,249 @@
+/* Series colour code: blue = values flowing forward, amber = gradients flowing backward. */
+.w {
+  --fwd: #78a8ff;
+  --fwd-soft: rgb(120 168 255 / 0.14);
+  --grad: #ffb45c;
+  --grad-soft: rgb(255 180 92 / 0.13);
+  --ok: #6fd39a;
+  --rule: rgb(255 255 255 / 0.1);
+  --panel: rgb(11 14 28 / 0.62);
+  margin-block: 2rem;
+  padding: 1.25rem;
+  display: grid;
+  gap: 1rem;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--rule);
+  border-radius: 1rem;
+  color: var(--color-fg);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+.w-wide {
+  margin-inline: min(0px, calc((100% - min(100vw - 2rem, 64rem)) / 2));
+}
+.w .w-left th,
+.w .w-left td {
+  text-align: left;
+}
+.w-label {
+  font: 600 0.7rem var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-dim);
+}
+.w-label code {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.8rem;
+}
+.w-fig {
+  overflow-x: auto;
+}
+.w-fig svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.w-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: end;
+}
+.w-ctl {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--color-dim);
+  min-width: 9rem;
+  flex: 1 1 9rem;
+}
+.w-ctl b {
+  color: var(--color-fg);
+  font: 600 0.85rem var(--font-mono);
+}
+.w-ctl input[type="range"] {
+  width: 100%;
+  accent-color: var(--fwd);
+}
+.w-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.w-btn {
+  font: 600 0.85rem var(--font-sans);
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-fg);
+  background: var(--color-fg);
+  color: var(--color-ink);
+  cursor: pointer;
+}
+.w-btn.ghost,
+.w-btn[aria-pressed="false"] {
+  background: transparent;
+  color: var(--color-fg);
+}
+.w-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.w-readout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.5rem;
+}
+.w-cell {
+  border: 1px solid var(--rule);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  display: grid;
+  gap: 0.1rem;
+}
+.w-cell span {
+  font-size: 0.72rem;
+  color: var(--color-dim);
+}
+.w-cell b {
+  font: 600 1.05rem var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.w-explain {
+  background: var(--grad-soft);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  min-height: 4.5em;
+}
+.w-explain b,
+.w-explain code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.w-log {
+  font: 0.8rem/1.5 var(--font-mono);
+  color: var(--color-dim);
+  min-height: 1.5em;
+}
+.w-fwd {
+  color: var(--fwd);
+}
+.w-grad {
+  color: var(--grad);
+}
+.w table {
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.w th,
+.w td {
+  text-align: right;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--rule);
+  font: 0.85rem var(--font-mono);
+}
+.w th {
+  font: 600 0.7rem var(--font-sans);
+  color: var(--color-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.w th:first-child,
+.w td:first-child {
+  text-align: left;
+}
+
+/* svg */
+.w .axis text,
+.w .svglabel {
+  fill: var(--color-dim);
+  font: 11px var(--font-mono);
+}
+.w .axis path,
+.w .axis line {
+  stroke: var(--rule);
+}
+.w .gridline {
+  stroke: var(--rule);
+  stroke-dasharray: 2 3;
+}
+.w .curve {
+  fill: none;
+  stroke: var(--color-fg);
+  stroke-width: 2;
+}
+.w .tangent {
+  stroke: var(--grad);
+  stroke-width: 2;
+}
+.w .secant {
+  stroke: var(--color-dim);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.w .tri {
+  stroke: var(--color-dim);
+  stroke-width: 1;
+  fill: none;
+}
+.w .dot {
+  fill: var(--fwd);
+  stroke: var(--color-ink);
+  stroke-width: 2;
+}
+.w .dot2 {
+  fill: var(--color-ink);
+  stroke: var(--fwd);
+  stroke-width: 2;
+}
+.w .trail {
+  fill: var(--grad);
+  opacity: 0.6;
+}
+.w .edge {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 2;
+}
+.w .edge.active {
+  stroke: var(--grad);
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
+  animation: w-flow 0.6s linear infinite;
+}
+@keyframes w-flow {
+  to {
+    stroke-dashoffset: 11;
+  }
+}
+.w .node rect {
+  fill: rgb(11 14 28);
+  stroke: var(--color-dim);
+  stroke-width: 1.5;
+}
+.w .node.leaf rect {
+  fill: rgb(255 255 255 / 0.04);
+}
+.w .node.active rect {
+  stroke: var(--grad);
+  stroke-width: 3;
+}
+.w .node .name {
+  fill: var(--color-fg);
+  font: 600 14px var(--font-mono);
+}
+.w .node .val {
+  fill: var(--fwd);
+  font: 13px var(--font-mono);
+}
+.w .node .g {
+  fill: var(--grad);
+  font: 600 13px var(--font-mono);
+}
+@media (prefers-reduced-motion: reduce) {
+  .w .edge.active {
+    animation: none;
+  }
+}

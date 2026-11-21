@@ -1,0 +1,41 @@
+---
+import "./widget.css";
+
+const BARS = [
+  [" mat", 0.41],
+  [" floor", 0.17],
+  [" sofa", 0.12],
+  [" roof", 0.06],
+] as const;
+---
+
+<div class="w not-prose">
+  <span class="w-label">One step of an LLM</span>
+  <div class="flex flex-wrap gap-2.5">
+    <div class="w-cell min-w-36 flex-1 content-start"><span>1 · text</span>"the cat sat on the"</div>
+    <div class="w-cell min-w-36 flex-1 content-start">
+      <span>2 · tokens</span>
+      <div class="flex flex-wrap gap-1">
+        {["the", " cat", " sat", " on", " the"].map((t) => <code class="rounded bg-(--fwd-soft) px-1.5 font-mono text-xs whitespace-pre">{t}</code>)}
+      </div>
+      <span>each becomes an id like 262</span>
+    </div>
+    <div class="w-cell min-w-36 flex-1 content-start"><span>3 · model</span>A big math expression with ~124M knobs</div>
+    <div class="w-cell min-w-44 flex-1 content-start">
+      <span>4 · next-token probabilities</span>
+      <div class="grid gap-1 font-mono text-xs tabular-nums">
+        {
+          BARS.map(([tok, p], i) => (
+            <div class="grid grid-cols-[3.8em_1fr_2.4em] items-center gap-1.5">
+              <span class="whitespace-pre">{tok}</span>
+              <i class:list={["block h-2 rounded-sm", i === 0 ? "bg-(--grad)" : "bg-(--fwd)"]} style={`width:${(p / BARS[0][1]) * 100}%`} />
+              <span>{p.toFixed(2)}</span>
+            </div>
+          ))
+        }
+      </div>
+      <span>illustrative numbers</span>
+    </div>
+    <div class="w-cell min-w-36 flex-1 content-start"><span>5 · loop</span>Pick " mat", append it, go back to 1.</div>
+  </div>
+</div>
