@@ -3,7 +3,7 @@ import type { GetStaticPaths } from "astro";
 import { render } from "astro:content";
 
 import PostLayout from "../../../layouts/PostLayout.astro";
-import { getPosts, getRelated, type Post } from "../../../lib/brain";
+import { getPosts, getRelated, getSeries, type Post } from "../../../lib/brain";
 
 export const getStaticPaths = (async () => {
   const posts = await getPosts();
@@ -20,8 +20,9 @@ interface Props {
 const { post } = Astro.props;
 const { Content } = await render(post);
 const related = await getRelated(post);
+const series = post.data.series ? await getSeries(post.data.series) : [];
 ---
 
-<PostLayout post={post} related={related}>
+<PostLayout post={post} related={related} series={series}>
   <Content />
 </PostLayout>

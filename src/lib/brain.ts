@@ -62,6 +62,10 @@ export async function getBrain(): Promise<Brain> {
   };
 }
 
+export async function getSeries(name: string): Promise<Post[]> {
+  return (await getPosts()).filter((p) => p.data.series === name).sort((a, b) => (a.data.part ?? 0) - (b.data.part ?? 0));
+}
+
 export async function getRelated(post: Post, n = 3): Promise<Post[]> {
   const mine = new Set(conceptsOf(post));
   const t = post.data.pubDate.valueOf();

@@ -1,13 +1,15 @@
 ---
 import Layout from "./Layout.astro";
+import SeriesNav from "../components/SeriesNav.astro";
 import { conceptsOf, lobeOf, readingMinutes, urlOf, type Post } from "../lib/brain";
 
 interface Props {
   post: Post;
   related: Post[];
+  series: Post[];
 }
 
-const { post, related } = Astro.props;
+const { post, related, series } = Astro.props;
 const { title, description, pubDate } = post.data;
 const lobe = lobeOf(post);
 ---
@@ -23,6 +25,7 @@ const lobe = lobeOf(post);
       <span>{readingMinutes(post)} min read</span>
       {conceptsOf(post).map((c) => <span>#{c}</span>)}
     </p>
+    {series.length > 0 && <SeriesNav post={post} parts={series} />}
 
     <article
       class="mt-10 prose max-w-none prose-invert sm:prose-lg
@@ -30,6 +33,7 @@ const lobe = lobeOf(post);
     >
       <slot />
     </article>
+    {series.length > 0 && <SeriesNav post={post} parts={series} pager />}
 
     {
       related.length > 0 && (
