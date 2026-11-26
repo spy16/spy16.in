@@ -1,0 +1,107 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="boids">
+  <span class="w-label">Three rules per fish, no leader · colour = heading</span>
+  <canvas class="w-canvas" aria-label="A flocking simulation: each fish steers by separation, alignment and cohesion with its neighbours"></canvas>
+  <div class="w-controls">
+    <label class="w-ctl">separation <b data-out="sep"></b><input data-in="sep" type="range" min="0" max="3" step="0.1" value="1.5" /></label>
+    <label class="w-ctl">alignment <b data-out="ali"></b><input data-in="ali" type="range" min="0" max="3" step="0.1" value="1" /></label>
+    <label class="w-ctl">cohesion <b data-out="coh"></b><input data-in="coh" type="range" min="0" max="3" step="0.1" value="1" /></label>
+  </div>
+  <div class="w-controls">
+    <div class="w-btns"><button class="w-btn" data-act="play">Pause</button><button class="w-btn ghost" data-act="scatter">Scatter</button></div>
+    <div class="w-cell bd-order"><span>order (1 = all swim the same way)</span><b data-out="order"></b></div>
+  </div>
+  <p class="w-log">Each fish sees only neighbours within a small radius: keep a little distance, match their heading, drift toward their centre. Set alignment to 0 and the school dissolves. Tap to startle them.</p>
+</div>
+
+<style is:global>
+  .w .bd-order { flex: 1 1 12rem; }
+</style>
+
+<script>
+  import { $, animate, canvasPoint, fitCanvas, mountAll } from "../widget/widget";
+
+  const W = 640, H = 360;
+  const VIEW = 48, CLOSE = 16, MIN_V = 70, MAX_V = 160, FEAR = 90;
+
+  mountAll("boids", (root) => {
+    const cv = $<HTMLCanvasElement>(root, "canvas");
+    const ctx = fitCanvas(cv, W, H);
+    const n = innerWidth < 640 ? 80 : 150;
+    const px = new Float32Array(n), py = new Float32Array(n), vx = new Float32Array(n), vy = new Float32Array(n);
+    const inp = (k: string) => +$<HTMLInputElement>(root, `[data-in="${k}"]`).value;
+    const out = (k: string, v: string) => ($(root, `[data-out="${k}"]`).textContent = v);
+    let threat: { x: number; y: number; t: number } | null = null;
+
+    const scatter = () => {
+      for (let i = 0; i < n; i++) {
+        px[i] = Math.random() * W; py[i] = Math.random() * H;
+        const a = Math.random() * Math.PI * 2;
+        vx[i] = Math.cos(a) * MIN_V; vy[i] = Math.sin(a) * MIN_V;
+      }
+    };
+
+    const step = (dt: number) => {
+      const ws = inp("sep"), wa = inp("ali"), wc = inp("coh");
+      for (let i = 0; i < n; i++) {
+        let sx = 0, sy = 0, ax = 0, ay = 0, cx = 0, cy = 0, k = 0;
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          let dx = px[j] - px[i], dy = py[j] - py[i];
+          if (dx > W / 2) dx -= W; else if (dx < -W / 2) dx += W;
+          if (dy > H / 2) dy -= H; else if (dy < -H / 2) dy += H;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > VIEW * VIEW) continue;
+          k++; ax += vx[j]; ay += vy[j]; cx += dx; cy += dy;
+          if (d2 < CLOSE * CLOSE) { const d = Math.sqrt(d2) || 1; sx -= dx / d; sy -= dy / d; }
+        }
+        let fx = sx * ws * 60, fy = sy * ws * 60;
+        if (k) {
+          fx += (ax / k - vx[i]) * wa * 1.2 + (cx / k) * wc * 1.2;
+          fy += (ay / k - vy[i]) * wa * 1.2 + (cy / k) * wc * 1.2;
+        }
+        if (threat) {
+          const dx = px[i] - threat.x, dy = py[i] - threat.y, d = Math.hypot(dx, dy);
+          if (d < FEAR) { fx += (dx / d) * 900; fy += (dy / d) * 900; }
+        }
+        vx[i] += fx * dt; vy[i] += fy * dt;
+        const s = Math.hypot(vx[i], vy[i]), c = Math.min(MAX_V, Math.max(MIN_V, s)) / (s || 1);
+        vx[i] *= c; vy[i] *= c;
+      }
+      let ox = 0, oy = 0;
+      for (let i = 0; i < n; i++) {
+        px[i] = (px[i] + vx[i] * dt + W) % W; py[i] = (py[i] + vy[i] * dt + H) % H;
+        const s = Math.hypot(vx[i], vy[i]); ox += vx[i] / s; oy += vy[i] / s;
+      }
+      if (threat && performance.now() - threat.t > 600) threat = null;
+      out("order", (Math.hypot(ox, oy) / n).toFixed(2));
+    };
+
+    const draw = () => {
+      ctx.clearRect(0, 0, W, H);
+      for (let i = 0; i < n; i++) {
+        const a = Math.atan2(vy[i], vx[i]);
+        ctx.fillStyle = `hsl(${(a * 180) / Math.PI + 180} 80% 72%)`;
+        ctx.beginPath();
+        ctx.moveTo(px[i] + Math.cos(a) * 7, py[i] + Math.sin(a) * 7);
+        ctx.lineTo(px[i] + Math.cos(a + 2.5) * 4, py[i] + Math.sin(a + 2.5) * 4);
+        ctx.lineTo(px[i] + Math.cos(a - 2.5) * 4, py[i] + Math.sin(a - 2.5) * 4);
+        ctx.fill();
+      }
+      if (threat) {
+        ctx.strokeStyle = "rgb(255 180 92 / 0.5)";
+        ctx.beginPath(); ctx.arc(threat.x, threat.y, FEAR * Math.min(1, (performance.now() - threat.t) / 300), 0, Math.PI * 2); ctx.stroke();
+      }
+    };
+
+    const label = () => ["sep", "ali", "coh"].forEach((k) => out(k, inp(k).toFixed(1)));
+    root.querySelectorAll("input").forEach((i) => i.addEventListener("input", label));
+    cv.addEventListener("click", (e) => { threat = { ...canvasPoint(cv, e, W, H), t: performance.now() }; });
+    $(root, '[data-act="scatter"]').addEventListener("click", () => { scatter(); draw(); });
+    scatter(); label(); draw();
+    animate(root, (dt) => { step(dt); draw(); }, $<HTMLButtonElement>(root, '[data-act="play"]'));
+  });
+</script>

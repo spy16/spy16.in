@@ -1,0 +1,93 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="morphogen">
+  <span class="w-label">Every cell runs the same rule · tap to add a drop of chemical</span>
+  <canvas class="w-canvas" aria-label="A reaction-diffusion simulation forming spots and stripes from identical cells"></canvas>
+  <div class="w-controls">
+    <div class="w-btns" role="group" aria-label="Pattern">
+      <button class="w-btn" data-preset="spots" aria-pressed="true">Spots</button>
+      <button class="w-btn" data-preset="stripes" aria-pressed="false">Stripes</button>
+      <button class="w-btn" data-preset="coral" aria-pressed="false">Coral</button>
+    </div>
+    <div class="w-btns"><button class="w-btn ghost" data-act="play">Pause</button><button class="w-btn ghost" data-act="reset">Reset</button></div>
+  </div>
+  <p class="w-log">Two chemicals diffuse between neighbouring cells; one feeds on the other. Change two rate constants (<span data-out="fk"></span>) and the same rule draws a different body plan. This is a Gray–Scott reaction–diffusion model, the kind of mechanism Alan Turing proposed in 1952 for how identical cells break symmetry.</p>
+</div>
+
+<script>
+  import { $, animate, canvasPoint, fitCanvas, mountAll } from "../widget/widget";
+
+  const GW = 160, GH = 96, W = 640, H = 384;
+  const DA = 1, DB = 0.5, ITER = 10;
+  const PRESETS: Record<string, [number, number]> = { spots: [0.035, 0.065], stripes: [0.029, 0.057], coral: [0.0545, 0.062] };
+
+  mountAll("morphogen", (root) => {
+    const cv = $<HTMLCanvasElement>(root, "canvas");
+    const ctx = fitCanvas(cv, W, H);
+    const off = document.createElement("canvas"); off.width = GW; off.height = GH;
+    const octx = off.getContext("2d")!, img = octx.createImageData(GW, GH);
+    let a = new Float32Array(GW * GH), b = new Float32Array(GW * GH), a2 = new Float32Array(GW * GH), b2 = new Float32Array(GW * GH);
+    let [feed, kill] = PRESETS.spots;
+
+    const seed = (x: number, y: number, r: number) => {
+      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) {
+        if (i * i + j * j > r * r) continue;
+        const cx = (x + i + GW) % GW, cy = (y + j + GH) % GH;
+        a[cy * GW + cx] = 0.5;
+        b[cy * GW + cx] = 0.25 + Math.random() * 0.05;
+      }
+    };
+    const reset = () => {
+      a.fill(1); b.fill(0);
+      for (let k = 0; k < 14; k++) seed(Math.floor(Math.random() * GW), Math.floor(Math.random() * GH), 5);
+    };
+
+    const step = () => {
+      for (let y = 0; y < GH; y++) {
+        const ym = ((y - 1 + GH) % GH) * GW, y0 = y * GW, yp = ((y + 1) % GH) * GW;
+        for (let x = 0; x < GW; x++) {
+          const xm = (x - 1 + GW) % GW, xp = (x + 1) % GW, i = y0 + x;
+          const la = 0.2 * (a[y0 + xm] + a[y0 + xp] + a[ym + x] + a[yp + x]) + 0.05 * (a[ym + xm] + a[ym + xp] + a[yp + xm] + a[yp + xp]) - a[i];
+          const lb = 0.2 * (b[y0 + xm] + b[y0 + xp] + b[ym + x] + b[yp + x]) + 0.05 * (b[ym + xm] + b[ym + xp] + b[yp + xm] + b[yp + xp]) - b[i];
+          const abb = a[i] * b[i] * b[i];
+          a2[i] = a[i] + DA * la - abb + feed * (1 - a[i]);
+          b2[i] = b[i] + DB * lb + abb - (kill + feed) * b[i];
+        }
+      }
+      [a, a2] = [a2, a]; [b, b2] = [b2, b];
+    };
+
+    const draw = () => {
+      const d = img.data;
+      for (let i = 0; i < GW * GH; i++) {
+        const v = Math.min(1, Math.max(0, (b[i] - 0.05) * 3.2));
+        d[i * 4] = 12 + v * (v < 0.6 ? 168 : 67);
+        d[i * 4 + 1] = 14 + v * (v < 0.6 ? 126 : 195);
+        d[i * 4 + 2] = 28 + v * 227;
+        d[i * 4 + 3] = 255;
+      }
+      octx.putImageData(img, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(off, 0, 0, W, H);
+      $(root, '[data-out="fk"]').textContent = `feed ${feed}, kill ${kill}`;
+    };
+
+    root.querySelectorAll<HTMLButtonElement>("[data-preset]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        [feed, kill] = PRESETS[btn.dataset.preset!];
+        root.querySelectorAll("[data-preset]").forEach((x) => x.setAttribute("aria-pressed", String(x === btn)));
+        reset(); for (let k = 0; k < 600; k++) step(); draw();
+      }));
+    cv.addEventListener("click", (e) => {
+      const p = canvasPoint(cv, e, GW, GH);
+      seed(Math.floor(p.x), Math.floor(p.y), 4); draw();
+    });
+    $(root, '[data-act="reset"]').addEventListener("click", () => { reset(); draw(); });
+    reset();
+    for (let k = 0; k < 600; k++) step();
+    draw();
+    animate(root, () => { for (let k = 0; k < ITER; k++) step(); draw(); }, $<HTMLButtonElement>(root, '[data-act="play"]'));
+  });
+</script>

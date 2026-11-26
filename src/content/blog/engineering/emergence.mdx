@@ -10,6 +10,9 @@ tags:
 ---
 
 import YouTube from '../../../components/YouTube.astro';
+import Ants from '../../../components/engineering/Ants.astro';
+import Morphogen from '../../../components/engineering/Morphogen.astro';
+import Boids from '../../../components/engineering/Boids.astro';
 
 Emergence is an interesting idea that complex behavior can emerge from group of very simple things that interact using a set of very simple rules. Emergence can be observed in lot of processes of nature. I present some of them here.
 
@@ -27,6 +30,10 @@ Then the question is, how does every ant in the colony know what it's supposed t
 
 Answer turns out to be a simple set of rules (about 20 simple chemical signals in case of fire ants for example) that each ant is wired to follow and all the colony behavior simply emerges.
 
+Here is a toy colony with just four rules. Watch trails form between the nest and the food:
+
+<Ants />
+
         <center><YouTube id="vG-QZOTc5_Q" /></center>
 
 ## Cell Differentiation
@@ -35,11 +42,19 @@ We start off as a single cell called a zygote which divides into 2, that divides
 
 Again the answer turns out be simple set of rules that each cell follows. Some subset of cells receive cues from the substances that are around them (e.g., yolk in a chicken egg) and produce some specific proteins which will be received by some other cells as cues for yet another type of protein thus setting off a chain reaction.
 
+You can watch a version of this happen. Every cell below runs the identical rule, yet spots and stripes appear:
+
+<Morphogen />
+
         <center><YouTube id="YtvL-LQlPrU" /></center>
 
 ## Fish Schools, Flock of Birds
 
 Certain types of fish and birds move together in a flock at an amazing speed without colliding. It is as if their movements are being coordinated by a central orchestrator. But when we look closely, we find that there is no central leader in the flock/school. It turns out, every fish or bird in the flock follows a [simple set of rules](https://en.wikipedia.org/wiki/Shoaling_and_schooling#Mathematical_models) and the overall behavior simply emerges.
+
+Three rules are enough. Try turning each one off:
+
+<Boids />
 
         <center><YouTube id="dkP8NUwB2io" /></center>
 

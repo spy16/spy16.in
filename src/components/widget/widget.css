@@ -247,3 +247,11 @@
     animation: none;
   }
 }
+.w canvas.w-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  background: rgb(0 0 0 / 0.35);
+  touch-action: pan-y;
+}
