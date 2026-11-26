@@ -16,7 +16,7 @@ I work with Kafka a lot and this post is a summary of some interesting facts abo
 
 * Topic is a logical grouping of partitions. But a partition is the storage unit in Kafka [^1]
 * Producer can decide which partition to publish to by explicitly setting the partition on the message.
-* If producer does not set or sets `PartitionAny`, round-robin is used starting with an arbitrary partition.
+* If producer does not set a partition (or sets `PartitionAny` in confluent-kafka-go), the partitioner picks one: messages with a key go to a partition chosen by hashing the key, so the same key always lands on the same partition. Keyless messages are spread across partitions (older Java clients used round-robin; newer ones fill one partition per batch).
 * `offset` is maintained per partition and is a monotonically increasing number starting from 0. (new-id=last-id +1)
 * Topic is always an append-only log. Message already published cannot be modified or deleted by the producer.
 * Order of messages is guaranteed within a partition but not at topic level.
@@ -56,7 +56,7 @@ $ kafka-run-class kafka.tools.DumpLogSegments --deep-iteration --print-data-log 
   topic.
 * Configured number of copies of partitions of the topic are maintained with one acting as leader (accepts reads +
   writes) and others acting as passive followers.
-* Kafka ensures only one replica of a topic is maintained on one node to provide **fault-tolerance**.
+* Kafka never places two replicas of the same partition on the same broker, so losing one broker loses at most one copy: **fault-tolerance**.
 * Replicas that are no more than `replica.lag.time.max.ms` behind the leader are called `In-Sync Replicas (ISR)`.
 * If the leader goes down, one of the ISRs is chosen as the new leader [^3].
 
@@ -74,7 +74,8 @@ Try it: slow a follower down until it leaves the ISR, then kill the leader.
   * If count(consumers) < count(partitions), some consumers will be assigned more than 1 partition to read from.
 * Based on `enable.auto.commit` config, consumers may commit messages automatically at interval set
   by `auto.commit.interval.ms` or a manual `commit()` may be required. With auto-commit enabled, `at-least once`
-  delivery semantics apply.
+  delivery semantics apply as long as each batch is fully processed before the next `poll()`, since that `poll()` is what
+  commits it.
 * Following steps can be taken to achieve required delivery semantics:
   1. at-least once: auto-commit enabled OR `poll()`, `process()` and then `commit()`
   2. at-most once: auto-commit false AND `poll()`, `commit()` and then `process()`

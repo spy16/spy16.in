@@ -96,7 +96,7 @@ Now, recall that the core will always fetch an entire cache-line sized chunk of 
 
 ### False Sharing
 
-False sharing occurs when two or more cores are updating parts of memory locations that happen to be on the same cache line but are different pieces of data. As a result of this sharing, the cores will repeatedly invalidate each other's cache lines even though, logically they are not accessing same pieces of data, causing unnecessary cache misses and main memory accesses.
+False sharing occurs when two or more cores are updating parts of memory locations that happen to be on the same cache line but are different pieces of data. As a result of this sharing, the cores will repeatedly invalidate each other's cache lines even though, logically they are not accessing same pieces of data, causing unnecessary cache misses and cache-line transfers between cores.
 
 This false-sharing is exactly what caused the first iteration to be 10x slower than the second.
 
@@ -108,7 +108,7 @@ If you look at the initial version of the `Counter` struct, it had 2 `int64` fie
 
 Since we have 2 goroutines updating `c1` and `c2` independently, it is likely that they are scheduled on different cores (although, not guaranteed). 
 
-When `c1` is modified, the cache-coherence protocol invalidates the entire cache line that includes both `c1` and `c2`. This results in a cache miss for the core updating `c2`, necessitating a re-fetch of the cache line from main memory, even though `c2` itself has not changed. Similarly, when `c2` is updated, `c1` is also re-fetched from main memory due to the cache line invalidation. So both cores are constantly invalidating each other's cache lines, causing unnecessary cache misses and main memory accesses.
+When `c1` is modified, the cache-coherence protocol invalidates the entire cache line that includes both `c1` and `c2` in the other core's cache. This results in a cache miss for the core updating `c2`, which has to pull the line back over from the first core's cache, even though `c2` itself has not changed. Similarly, when `c2` is updated, the line is invalidated for the core updating `c1`. So the line keeps bouncing between the two cores, and every increment waits for that transfer.
 
 In the second iteration of the struct, we introduced **padding** (specifically, `_    [56]byte`). This adjustment ensured that `c1`, with its size of 8 bytes, plus the padding, now spans a total of 64 bytes, effectively placing `c2` on a distinct cache line. Consequently, when `c1` is updated, it no longer triggers the invalidation of `c2`, and vice versa.
 This deliberate design change enabled the cores to operate independently, resulting in a significant 10x increase in throughput.

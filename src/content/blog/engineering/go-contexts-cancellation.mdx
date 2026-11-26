@@ -33,7 +33,7 @@ ctx, cancel := context.WithDeadline(baseCtx, time.Unix(2700904156, 0))
 **Note**: It is important to note that, in all the above cases, the `ctx` will be cancelled if `baseCtx` is
 cancelled as well.
 
-You might notice that each `With` variant returns a `cancel` function. This is because these variants internally set up a goroutine to monitor the time/deadline and perform the actual cancellation. The `cancel` function can be used to stop these goroutines and perform any necessary cleanup when the `ctx` is no longer needed. To ensure proper cleanup, it is recommended to call `cancel` using `defer` right after the `WithX()` line.
+You might notice that each `With` variant returns a `cancel` function. This is because each variant registers the new context with its parent so that cancellation can propagate down, and `WithTimeout`/`WithDeadline` also start a timer. The `cancel` function releases these (it detaches the context from its parent and stops the timer) when the `ctx` is no longer needed. To ensure proper cleanup, it is recommended to call `cancel` using `defer` right after the `WithX()` line.
 
 And we can check if a context is cancelled using a `select` statement:
 
