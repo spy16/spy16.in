@@ -6,7 +6,7 @@ import docutalkLogo from "./assets/docutalk.png";
 import directiLogo from "./assets/directi.png";
 
 export const SITE_TITLE = "spy16.in";
-export const SITE_DESCRIPTION = "A small corner of Prasad's brain: posts on engineering and AI.";
+export const SITE_DESCRIPTION = "A small corner of Prasad's brain: posts on engineering, AI and things that made me curious.";
 export const TWITTER_HANDLE = "@spy16x";
 const EMAIL = "shiv.ylp@gmail.com";
 
@@ -17,6 +17,7 @@ export const EXPERIENCE = new Date().getFullYear() - 2016;
 export const LOBES = {
   ai: { name: "AI & Assistants", rgb: "180,140,255" },
   engineering: { name: "Software Engineering", rgb: "79,209,255" },
+  nature: { name: "Nature & Curiosities", rgb: "126,224,160" },
 } as const;
 
 export type Lobe = keyof typeof LOBES;

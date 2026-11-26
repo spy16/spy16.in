@@ -9,10 +9,11 @@ import type { Brain, BrainPost } from "../lib/brain";
 const RGB: Record<string, string> = {
   ai: "180,140,255",
   engineering: "79,209,255",
+  nature: "126,224,160",
   base: "111,125,255",
   concept: "225,230,255",
 };
-const LOBE_ANGLE: Record<string, number> = { ai: -Math.PI / 2, engineering: Math.PI / 2 - 0.35 };
+const LOBE_ANGLE: Record<string, number> = { ai: -Math.PI / 2, engineering: Math.PI / 2 - 0.55, nature: Math.PI - 0.2 };
 const MAX_PULSES = 1600;
 const TRACE_TAU_S = 2.2;
 const HEBB_TAU_S = 90;

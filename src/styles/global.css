@@ -10,6 +10,7 @@
   --color-dim: #8b93b8;
   --color-ai: rgb(180 140 255);
   --color-engineering: rgb(79 209 255);
+  --color-nature: rgb(126 224 160);
 }
 
 html {
@@ -91,6 +92,10 @@ html {
 
 .lobe-engineering {
   --lobe: var(--color-engineering);
+}
+
+.lobe-nature {
+  --lobe: var(--color-nature);
 }
 
 .read-progress {
