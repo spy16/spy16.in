@@ -1,0 +1,137 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="futex">
+  <span class="w-label">one <code>pthread_mutex_t</code> · glibc's three-state lock word · slowed down a lot</span>
+  <div class="fx-top">
+    <div class="fx-word"><span>lock word</span><b data-out="word">0</b><em data-out="meaning"></em></div>
+    <div class="fx-kq"><span>kernel wait queue for this address</span><div data-out="queue"></div></div>
+  </div>
+  <div class="fx-threads" data-out="threads"></div>
+  <div class="w-controls">
+    <label class="w-ctl">threads <b data-out="n"></b><input data-in="n" type="range" min="1" max="6" step="1" value="2" /></label>
+    <label class="w-ctl">time holding the lock <b data-out="hold"></b><input data-in="hold" type="range" min="0.05" max="1.5" step="0.05" value="0.15" /></label>
+    <div class="w-btns"><button class="w-btn ghost" data-act="reset">Reset counters</button></div>
+  </div>
+  <div class="w-readout fx-readout">
+    <div class="w-cell"><span>locks, no syscall</span><b class="fx-ok" data-out="fast">0</b></div>
+    <div class="w-cell"><span>FUTEX_WAIT</span><b class="w-grad" data-out="wait">0</b></div>
+    <div class="w-cell"><span>FUTEX_WAKE</span><b class="w-grad" data-out="wake">0</b></div>
+    <div class="w-cell"><span>EAGAIN</span><b class="w-fwd" data-out="again">0</b></div>
+  </div>
+  <p class="w-explain" data-out="log">Each thread works on its own for a while, then takes the lock. With one or two threads and a short hold, almost every lock and unlock is a single atomic instruction.</p>
+</div>
+
+<style is:global>
+  .w .fx-top { display: grid; gap: 0.6rem; grid-template-columns: auto 1fr; align-items: stretch; }
+  .w .fx-word, .w .fx-kq { border: 1px solid var(--rule); border-radius: 0.6rem; padding: 0.5rem 0.75rem; display: grid; gap: 0.2rem; font: 0.72rem var(--font-mono); color: var(--color-dim); }
+  .w .fx-word b { font: 600 1.8rem var(--font-mono); color: var(--fwd); line-height: 1.1; }
+  .w .fx-word b.two { color: var(--grad); }
+  .w .fx-word em { font-style: normal; color: var(--color-fg); }
+  .w .fx-kq > div { display: flex; flex-wrap: wrap; gap: 0.3rem; min-height: 1.6rem; align-items: center; }
+  .w .fx-kq i { font: 600 0.72rem var(--font-mono); font-style: normal; padding: 0.15rem 0.5rem; border-radius: 99px; border: 1px solid var(--grad); color: var(--grad); }
+  .w .fx-threads { display: grid; gap: 0.3rem; font: 0.75rem var(--font-mono); }
+  .w .fx-row { display: grid; grid-template-columns: 2rem 1fr; gap: 0.5rem; align-items: center; color: var(--color-dim); }
+  .w .fx-state { border-radius: 0.4rem; padding: 0.25rem 0.5rem; border: 1px solid var(--rule); transition: background 0.15s, color 0.15s; }
+  .w .fx-state.hold { background: color-mix(in srgb, var(--fwd) 18%, transparent); color: var(--fwd); border-color: var(--fwd); }
+  .w .fx-state.kernel { background: color-mix(in srgb, var(--grad) 14%, transparent); color: var(--grad); border-color: var(--grad); }
+  .w .fx-state.spin { color: var(--color-fg); }
+  .w .fx-readout { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .w .fx-ok { color: var(--ok); }
+  @media (max-width: 30rem) { .w .fx-readout { grid-template-columns: repeat(2, minmax(0, 1fr)); } .w .fx-top { grid-template-columns: 1fr; } }
+</style>
+
+<script>
+  import { $, animate, mountAll } from "../widget/widget";
+
+  const WORK = [0.5, 1.4], SYSCALL_S = 0.12, WAKEUP_S = 0.18;
+  const MEANING = ["free", "locked, nobody waiting", "locked, maybe waiters"];
+
+  type Phase = "work" | "hold" | "entering" | "sleep" | "waking";
+  type T = { id: number; phase: Phase; until: number; el: HTMLElement };
+
+  mountAll("futex", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const inp = (k: string) => $<HTMLInputElement>(root, `[data-in="${k}"]`);
+    const log = (s: string) => (out("log").textContent = s);
+    let word = 0, now = 0, threads: T[] = [], queue: T[] = [];
+    const c = { fast: 0, wait: 0, wake: 0, again: 0 };
+    const work = () => now + WORK[0] + Math.random() * (WORK[1] - WORK[0]);
+
+    const acquire = (t: T) => { t.phase = "hold"; t.until = now + +inp("hold").value; };
+
+    // __lll_lock_wait: xchg(2) until it returns 0, sleeping in FUTEX_WAIT(addr, 2) in between.
+    const slowPath = (t: T) => {
+      const old = word; word = 2;
+      if (old === 0) { acquire(t); return; }
+      t.phase = "entering"; t.until = now + SYSCALL_S;
+    };
+
+    const unlock = (t: T) => {
+      const old = word; word = 0;
+      t.phase = "work"; t.until = work();
+      if (old > 1) {
+        c.wake++;
+        const w = queue.shift();
+        if (w) { w.phase = "waking"; w.until = now + WAKEUP_S; log(`T${t.id} unlocked and saw 2, so it called FUTEX_WAKE(addr, 1). The kernel moves T${w.id} off the queue; it still has to win the lock word again.`); }
+        else log(`T${t.id} saw 2 and called FUTEX_WAKE, but nobody was asleep. That wasted syscall is the price of 2 meaning "maybe waiters".`);
+      }
+    };
+
+    const step = (dt: number) => {
+      now += dt;
+      for (const t of threads) {
+        if (now < t.until || t.phase === "sleep") continue;
+        if (t.phase === "work") {
+          if (word === 0) { word = 1; c.fast++; acquire(t); }
+          else slowPath(t);
+        } else if (t.phase === "hold") unlock(t);
+        else if (t.phase === "entering") {
+          c.wait++;
+          if (word !== 2) { c.again++; log(`T${t.id} called FUTEX_WAIT(addr, 2), but the word had changed to ${word} on the way in. The kernel returned EAGAIN instead of sleeping, so no wakeup was lost.`); slowPath(t); }
+          else { t.phase = "sleep"; queue.push(t); }
+        } else if (t.phase === "waking") slowPath(t);
+      }
+    };
+
+    const render = () => {
+      out("threads").replaceChildren(...threads.map((t) => {
+        t.el.className = "fx-row";
+        t.el.innerHTML = `<span>T${t.id}</span><span class="fx-state"></span>`;
+        return t.el;
+      }));
+      update();
+    };
+
+    const LABEL: Record<Phase, string> = { work: "working, no lock", hold: "holding the lock", entering: "word is 2 → syscall FUTEX_WAIT", sleep: "asleep in the kernel", waking: "woken, retrying xchg(2)" };
+    const update = () => {
+      out("word").textContent = String(word);
+      out("word").classList.toggle("two", word === 2);
+      out("meaning").textContent = MEANING[word];
+      out("queue").innerHTML = queue.length ? queue.map((t) => `<i>T${t.id}</i>`).join("") : "empty: the kernel keeps nothing for this lock";
+      for (const t of threads) {
+        const s = t.el.lastElementChild as HTMLElement;
+        s.className = `fx-state ${t.phase === "hold" ? "hold" : t.phase === "sleep" || t.phase === "entering" ? "kernel" : t.phase === "waking" ? "spin" : ""}`;
+        s.textContent = LABEL[t.phase];
+      }
+      for (const k of Object.keys(c) as (keyof typeof c)[]) out(k).textContent = String(c[k]);
+      out("n").textContent = inp("n").value;
+      out("hold").textContent = `${(+inp("hold").value).toFixed(2)} s`;
+    };
+
+    const setThreads = (n: number) => {
+      while (threads.length < n) threads.push({ id: threads.length + 1, phase: "work", until: work(), el: document.createElement("div") });
+      for (const t of threads.splice(n)) if (t.phase === "hold") { word = 0; queue.forEach((w) => { w.phase = "waking"; w.until = now; }); queue = []; }
+      queue = queue.filter((t) => threads.includes(t));
+      render();
+    };
+
+    inp("n").addEventListener("input", () => setThreads(+inp("n").value));
+    inp("hold").addEventListener("input", update);
+    $(root, '[data-act="reset"]').addEventListener("click", () => { c.fast = c.wait = c.wake = c.again = 0; update(); });
+
+    setThreads(+inp("n").value);
+    animate(root, (dt) => { step(dt); update(); });
+  });
+</script>

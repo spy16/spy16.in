@@ -1,0 +1,104 @@
+---
+title: "Futex: why your mutex rarely talks to the kernel"
+pubDate: 2026-11-27
+publish: true
+description: |
+  A Linux mutex is usually one atomic instruction. The kernel only gets involved when a thread actually has to sleep, and futex is how.
+tags: [deep-tech, linux, concurrency, os]
+---
+
+import Futex from "../../../components/engineering/Futex.astro";
+
+A Linux mutex is usually one atomic instruction. The kernel only gets involved when a thread actually has to sleep, and the piece that makes this possible is the **futex** (fast user-space mutex).
+
+## Problem
+
+A lock has two jobs. It has to let exactly one thread in, and it has to make the others wait. The first job is easy in user space: a compare-and-swap on a shared integer does it. The second job is not. Only the kernel can take a thread off the CPU and put it back later.
+
+So we have two bad options:
+
+1. **Spin.** Loop on the compare-and-swap until it succeeds. No kernel involvement, but a waiting thread burns a whole core, and if the lock holder gets descheduled, everyone spins for nothing.
+2. **Ask the kernel every time.** System V semaphores worked this way: every `semop()` is a system call, even when nobody else wants the lock. Most locks are uncontended most of the time, so this pays the syscall price for nothing.
+
+What we want is the first option when there is no contention and the second only when there is. That is the goal of the original futex paper from 2002 [^1].
+
+## The idea
+
+A futex is just a 32-bit integer in your own memory, plus two system calls that take its address [^2]:
+
+- `FUTEX_WAIT(addr, val)`: put me to sleep, **but only if `*addr` still equals `val`**. Otherwise return `EAGAIN` immediately.
+- `FUTEX_WAKE(addr, n)`: wake up to `n` threads sleeping on `addr`.
+
+That's it. The kernel doesn't know what the integer means. It doesn't know it's a lock. It keeps no state for it at all until a thread calls `FUTEX_WAIT`, and it forgets it again when the last waiter leaves. All the meaning lives in user space.
+
+## A lock in three states
+
+glibc builds its internal lock (the one under `pthread_mutex_t` for the default mutex type) on a futex word with three values [^3]:
+
+- `0`: free
+- `1`: locked, nobody waiting
+- `2`: locked, maybe someone waiting
+
+This is the code, trimmed from `lowlevellock.h` and `lowlevellock.c` [^4]:
+
+```c
+void lock(int *futex) {
+    if (cas(futex, 0, 1))          // 0 -> 1: got it, no syscall
+        return;
+    while (xchg(futex, 2) != 0)    // mark "maybe waiters"
+        futex_wait(futex, 2);      // sleep only if it is still 2
+}
+
+void unlock(int *futex) {
+    if (xchg(futex, 0) > 1)        // was it 2?
+        futex_wake(futex, 1);      // then wake one
+}
+```
+
+Uncontended, `lock()` is one `cas` and `unlock()` is one `xchg`. No kernel.
+
+The value `2` is what keeps `unlock()` cheap. Without it, the unlocking thread can't tell if anyone is asleep, so it would have to call `futex_wake` every time just in case. With it, the syscall only happens when someone has announced they might be waiting.
+
+Notice that a thread that wakes up writes `2` again, not `1`. It has no idea whether other threads are still asleep, so it assumes they are. The cost is an occasional `FUTEX_WAKE` that finds nobody. That's much cheaper than a thread sleeping forever.
+
+## The race `FUTEX_WAIT` exists for
+
+Why does `FUTEX_WAIT` take a value at all? Why not just "sleep on this address"?
+
+Consider this order of events:
+
+1. T1 holds the lock. T2 calls `lock()`, sets the word to `2`, and decides to sleep.
+2. Before T2's syscall reaches the kernel, T1 calls `unlock()`. It sets the word to `0`, sees it was `2`, and calls `FUTEX_WAKE`. Nobody is on the queue yet, so the wake does nothing.
+3. T2's `FUTEX_WAIT` finally lands in the kernel and goes to sleep.
+
+Now T2 sleeps on a free lock and nobody will ever wake it. This is the classic **lost wakeup**.
+
+The value argument closes it. Inside the kernel, `futex_wait_setup()` takes the lock of the hash bucket for this address, re-reads the word from user memory, and only queues the thread if the word still equals `val` [^5]. `FUTEX_WAKE` takes the same bucket lock. So in step 3 the kernel reads `0`, sees it isn't `2`, and returns `EAGAIN`. T2 goes around the loop, does `xchg(2)`, gets back `0`, and owns the lock. The man page calls this an atomic "compare-and-block" [^2].
+
+## Where the waiters live
+
+The kernel keeps a hash table of buckets, each with a spinlock and a list of sleeping threads (recent kernels can also give a process its own private table [^6]). The key for a private futex is `(mm, address)`: your process's address space plus the virtual address. For a futex in shared memory, which can sit at different addresses in different processes, the key is built from the underlying file or page instead [^6]. Since Linux 2.6.22 you can pass `FUTEX_PRIVATE_FLAG` to tell the kernel the futex is not shared, which lets it skip that more expensive lookup [^2]. glibc does this for process-private mutexes.
+
+An uncontended lock never touches this table. That's the whole point.
+
+## Try it
+
+Start with two threads and a short hold time: the **locks, no syscall** counter does nearly all the work. Then add threads or hold the lock longer and watch the word sit at `2` while the kernel queue fills up. Keep an eye on **EAGAIN**: those are the lost wakeups from the section above, prevented.
+
+<Futex />
+
+## What this leaves out
+
+- glibc has no wrapper for `futex()`. You call it through `syscall(SYS_futex, ...)` [^2], and you almost never should.
+- Priority inheritance (`FUTEX_LOCK_PI`) changes the deal: the word holds the owner's thread ID so the kernel can boost the owner's priority [^2].
+- The newer `futex_waitv()` call waits on up to 128 futexes at once and wakes on any of them [^7].
+
+So the kernel only shows up when a thread actually has to sleep. Everything else is one atomic instruction on an integer you own.
+
+[^1]: Franke, Russell, Kirkwood, [Fuss, Futexes and Furwocks: Fast Userlevel Locking in Linux](https://www.kernel.org/doc/ols/2002/ols2002-pages-479-495.pdf), Ottawa Linux Symposium 2002.
+[^2]: [futex(2)](https://man7.org/linux/man-pages/man2/futex.2.html), Linux man pages.
+[^3]: Ulrich Drepper, [Futexes Are Tricky](https://www.akkadia.org/drepper/futex.pdf). Walks through why the simpler versions are broken.
+[^4]: glibc [sysdeps/nptl/lowlevellock.h](https://github.com/bminor/glibc/blob/master/sysdeps/nptl/lowlevellock.h) and [nptl/lowlevellock.c](https://github.com/bminor/glibc/blob/master/nptl/lowlevellock.c).
+[^5]: Linux [kernel/futex/waitwake.c](https://github.com/torvalds/linux/blob/master/kernel/futex/waitwake.c), `futex_wait_setup()` and the ordering comment above it.
+[^6]: Linux [kernel/futex/core.c](https://github.com/torvalds/linux/blob/master/kernel/futex/core.c), `get_futex_key()`.
+[^7]: [futex2 documentation](https://docs.kernel.org/userspace-api/futex2.html), kernel.org.
