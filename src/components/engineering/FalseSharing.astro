@@ -1,0 +1,196 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="false-sharing">
+  <span class="w-label">Two cores, one cache line · slowed down about 100 million times</span>
+  <pre class="fs-code"><code>type Counters struct {"{"}
+	c1 int64
+	_  [<b data-out="pad">0</b>]byte
+	c2 int64
+{"}"}</code></pre>
+  <div class="w-fig"><svg role="img" aria-label="Two CPU cores, their L1 caches, and the 128 bytes of memory holding c1 and c2"></svg></div>
+  <div class="w-controls">
+    <label class="w-ctl">padding = <b data-out="padb"></b><input data-in="pad" type="range" min="0" max="56" step="8" value="0" /></label>
+    <div class="w-btns"><button class="w-btn" data-act="play" aria-pressed="true">Pause</button><button class="w-btn ghost" data-act="reset">Reset</button></div>
+  </div>
+  <div class="w-readout fs-readout">
+    <div class="w-cell"><span>c1 increments</span><b class="w-fwd" data-out="c1"></b></div>
+    <div class="w-cell"><span>c2 increments</span><b class="w-fwd" data-out="c2"></b></div>
+    <div class="w-cell"><span>line transfers</span><b class="w-grad" data-out="xfer"></b></div>
+  </div>
+  <p class="w-explain" data-out="explain"></p>
+  <p class="w-log">Timings are illustrative: a local write costs 1 unit, moving the line between cores 4. The post's real runs on an M2 Air: ~35M incr/s shared, ~250M padded.</p>
+</div>
+
+<style>
+  .fs-code {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    background: rgb(0 0 0 / 0.35);
+    font: 0.85rem/1.5 var(--font-mono);
+    overflow-x: auto;
+  }
+  .fs-code b {
+    color: var(--grad);
+  }
+</style>
+
+<script>
+  import { $, mountAll, reduceMotion } from "../widget/widget";
+
+  const HIT = 150;
+  const XFER = 600;
+  const W = 480, H = 236;
+  const SLOT = 26, MEM_X = (W - SLOT * 16) / 2, MEM_Y = 174;
+  const CORE_X = [24, W - 24 - 8 * 22], CORE_Y = 24, LSLOT = 22;
+  const NS = "http://www.w3.org/2000/svg";
+
+  type Core = { count: number; mode: "want" | "xfer" | "hit"; until: number; holds: number | null };
+
+  mountAll("false-sharing", (root) => {
+    const svg = $<SVGSVGElement>(root, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const el = (tag: string, attrs: Record<string, string | number>, parent: Element = svg, text?: string) => {
+      const e = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      if (text !== undefined) e.textContent = text;
+      parent.appendChild(e);
+      return e;
+    };
+    const inp = $<HTMLInputElement>(root, '[data-in="pad"]');
+    const out = (k: string, v: string) => ($(root, `[data-out="${k}"]`).textContent = v);
+    const playBtn = $<HTMLButtonElement>(root, '[data-act="play"]');
+
+    let pad = 0, t = 0, xfers = 0, cores: Core[] = [], flight: { from: number | "mem"; to: number; start: number }[] = [];
+    const offset = (i: number) => (i === 0 ? 0 : 8 + pad);
+    const lineOf = (i: number) => Math.floor(offset(i) / 64);
+    const shared = () => lineOf(0) === lineOf(1);
+
+    const reset = () => {
+      pad = +inp.value; t = 0; xfers = 0; flight = [];
+      cores = [0, 1].map(() => ({ count: 0, mode: "want" as const, until: 0, holds: null }));
+      grant(0, "mem");
+      if (!shared()) grant(1, "mem");
+      out("pad", String(pad)); out("padb", `${pad} bytes`);
+      out("explain", shared()
+        ? `c1 sits at byte 0 and c2 at byte ${offset(1)}: both in cache line 0. A core can only write a line it holds exclusively (state M), so every increment drags the whole line over from the other core, which drops to I. The cores take turns, and each waits on every transfer.`
+        : `c2 now starts at byte 64, in cache line 1. Each core keeps its own line in state M and never has to ask the other for it, so both increment back to back.`);
+      drawStatic();
+    };
+
+    const grant = (i: number, from: number | "mem") => {
+      const c = cores[i];
+      c.mode = "xfer"; c.until = t + XFER; c.holds = null;
+      flight.push({ from, to: i, start: t });
+      xfers++;
+    };
+
+    const step = (dt: number) => {
+      t += dt;
+      cores.forEach((c, i) => {
+        if (t < c.until) return;
+        const other = cores[1 - i];
+        if (c.mode === "xfer") {
+          flight = flight.filter((f) => f.to !== i);
+          c.holds = lineOf(i); c.mode = "hit"; c.until = t + HIT;
+        } else if (c.mode === "hit") {
+          c.count++;
+          if (shared() && other.mode === "want") {
+            c.holds = null; c.mode = "want"; c.until = Infinity;
+            grant(1 - i, i);
+          } else c.until = t + HIT;
+        }
+      });
+    };
+
+    // static layers
+    const gStatic = el("g", {}), gLive = el("g", {});
+    const lineCells = (x: number, y: number, line: number, parent: Element, cls: string) => {
+      for (let s = 0; s < 8; s++) {
+        const byte = line * 64 + s * 8;
+        const who = byte === offset(0) ? "c1" : byte === offset(1) ? "c2" : byte > 0 && byte < offset(1) ? "pad" : "";
+        el("rect", { x: x + s * LSLOT, y, width: LSLOT - 2, height: 22, rx: 3, class: `fs-slot ${who} ${cls}` }, parent);
+        if (who === "c1" || who === "c2") el("text", { x: x + s * LSLOT + (LSLOT - 2) / 2, y: y + 15, "text-anchor": "middle", class: "fs-t" }, parent, who);
+      }
+    };
+
+    const drawStatic = () => {
+      gStatic.replaceChildren();
+      [0, 1].forEach((i) => {
+        const x = CORE_X[i];
+        el("rect", { x: x - 10, y: CORE_Y - 10, width: 8 * LSLOT + 18, height: 100, rx: 10, class: "fs-core" }, gStatic);
+        el("text", { x, y: CORE_Y + 8, class: "fs-h" }, gStatic, `core ${i + 1} · c${i + 1}++`);
+              });
+      for (let s = 0; s < 16; s++) {
+        const byte = s * 8;
+        const who = byte === offset(0) ? "c1" : byte === offset(1) ? "c2" : byte > 0 && byte < offset(1) ? "pad" : "";
+        el("rect", { x: MEM_X + s * SLOT, y: MEM_Y, width: SLOT - 2, height: 24, rx: 3, class: `fs-slot ${who}` }, gStatic);
+        if (who === "c1" || who === "c2") el("text", { x: MEM_X + s * SLOT + (SLOT - 2) / 2, y: MEM_Y + 16, "text-anchor": "middle", class: "fs-t" }, gStatic, who);
+      }
+      el("line", { x1: MEM_X + 8 * SLOT - 1, x2: MEM_X + 8 * SLOT - 1, y1: MEM_Y - 8, y2: MEM_Y + 32, class: "fs-div" }, gStatic);
+      el("text", { x: MEM_X, y: MEM_Y - 8, class: "fs-s" }, gStatic, "memory · cache line 0");
+      el("text", { x: MEM_X + 8 * SLOT + 6, y: MEM_Y - 8, class: "fs-s" }, gStatic, "cache line 1");
+      el("text", { x: MEM_X, y: MEM_Y + 46, class: "fs-s" }, gStatic, "byte 0");
+      el("text", { x: MEM_X + 8 * SLOT + 6, y: MEM_Y + 46, class: "fs-s" }, gStatic, "byte 64");
+    };
+
+    const lineXY = (who: number | "mem", line: number) =>
+      who === "mem" ? { x: MEM_X + line * 8 * SLOT, y: MEM_Y } : { x: CORE_X[who], y: CORE_Y + 30 };
+
+    const drawLive = () => {
+      gLive.replaceChildren();
+      cores.forEach((c, i) => {
+        const x = CORE_X[i], y = CORE_Y + 30;
+        const held = c.holds !== null;
+        lineCells(x, y, lineOf(i), gLive, held ? "" : "gone");
+        el("text", { x: x + 8 * LSLOT - 4, y: CORE_Y + 8, "text-anchor": "end", class: `fs-state ${held ? "m" : "i"}` }, gLive, held ? "M" : "I");
+        if (c.mode === "hit" && t - (c.until - HIT) < HIT * 0.6) el("rect", { x: x + (offset(i) % 64) / 8 * LSLOT - 2, y: y - 2, width: LSLOT + 2, height: 26, rx: 4, class: "fs-flash" }, gLive);
+        el("text", { x, y: CORE_Y + 80, class: "fs-s" }, gLive, c.mode === "hit" ? "writing" : "waiting for the line…");
+      });
+      flight.forEach((f) => {
+        const line = lineOf(f.to);
+        const a = lineXY(f.from, line), b = lineXY(f.to, line);
+        const p = Math.min(1, (t - f.start) / XFER), e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+        el("rect", { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e, width: 8 * LSLOT - 2, height: 22, rx: 4, class: "fs-packet" }, gLive);
+      });
+      out("c1", cores[0].count.toLocaleString()); out("c2", cores[1].count.toLocaleString()); out("xfer", xfers.toLocaleString());
+    };
+
+    let playing = !reduceMotion(), visible = false, last = 0, raf = 0;
+    const frame = (now: number) => {
+      const dt = Math.min(64, now - last); last = now;
+      step(dt); drawLive();
+      raf = playing && visible ? requestAnimationFrame(frame) : 0;
+    };
+    const kick = () => { if (playing && visible && !raf) { last = performance.now(); raf = requestAnimationFrame(frame); } };
+    const setPlaying = (p: boolean) => { playing = p; playBtn.textContent = p ? "Pause" : "Play"; playBtn.setAttribute("aria-pressed", String(p)); kick(); };
+    new IntersectionObserver(([e]) => { visible = e.isIntersecting; kick(); }).observe(root);
+
+    inp.addEventListener("input", () => { reset(); drawLive(); });
+    playBtn.addEventListener("click", () => setPlaying(!playing));
+    $(root, '[data-act="reset"]').addEventListener("click", () => { reset(); drawLive(); });
+    setPlaying(playing);
+    reset(); drawLive();
+  });
+</script>
+
+<style is:global>
+  .w .fs-core { fill: rgb(255 255 255 / 0.03); stroke: var(--rule); }
+  .w .fs-h { fill: var(--color-fg); font: 600 16px var(--font-mono); }
+  .w .fs-s { fill: var(--color-dim); font: 14px var(--font-mono); }
+  .w .fs-t { fill: var(--color-ink); font: 700 12px var(--font-mono); pointer-events: none; }
+  .w .fs-slot { fill: rgb(255 255 255 / 0.05); stroke: var(--rule); }
+  .w .fs-slot.c1, .w .fs-slot.c2 { fill: var(--fwd); stroke: none; }
+  .w .fs-slot.pad { fill: var(--grad-soft); stroke: var(--grad); stroke-opacity: 0.5; stroke-dasharray: 2 2; }
+  .w .fs-slot.gone { opacity: 0.18; }
+  .w .fs-div { stroke: var(--grad); stroke-dasharray: 3 3; }
+  .w .fs-state { font: 700 17px var(--font-mono); }
+  [data-widget="false-sharing"] .w-fig svg { max-width: 34rem; margin-inline: auto; }
+  .w .fs-readout { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .w .fs-state.m { fill: var(--ok); }
+  .w .fs-state.i { fill: var(--grad); }
+  .w .fs-flash { fill: none; stroke: var(--ok); stroke-width: 2; }
+  .w .fs-packet { fill: var(--grad-soft); stroke: var(--grad); stroke-width: 1.5; }
+</style>

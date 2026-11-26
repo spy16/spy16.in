@@ -8,6 +8,8 @@ tags: [perf, optimization, golang]
 no_toc: false
 ---
 
+import FalseSharing from "../../../components/engineering/FalseSharing.astro";
+
 In this article, I will show you a fun little experiment with Go to see effects of [false-sharing](https://en.wikipedia.org/wiki/False_sharing#Multiprocessor_CPU_caches). 
 
 Take a look at the following, simple, Go code:
@@ -97,6 +99,10 @@ Now, recall that the core will always fetch an entire cache-line sized chunk of 
 False sharing occurs when two or more cores are updating parts of memory locations that happen to be on the same cache line but are different pieces of data. As a result of this sharing, the cores will repeatedly invalidate each other's cache lines even though, logically they are not accessing same pieces of data, causing unnecessary cache misses and main memory accesses.
 
 This false-sharing is exactly what caused the first iteration to be 10x slower than the second.
+
+Here is the experiment slowed down. Drag the padding and watch where `c2` lands: it only escapes at 56 bytes, when it starts a new cache line.
+
+<FalseSharing />
 
 If you look at the initial version of the `Counter` struct, it had 2 `int64` fields, effectively making it 16-bytes in size. This would fit easily on a single cache line (assuming the most common 64-byte cache-line on modern CPUs). 
 
