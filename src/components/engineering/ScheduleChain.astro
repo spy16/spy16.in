@@ -1,0 +1,151 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="schedule-chain">
+  <span class="w-label"><code>schedule1</code> · <code data-out="crontab">@every 1h</code> · each run enqueues the next</span>
+  <div class="w-fig"><svg role="img" aria-label="A timeline of one schedule: the crontab's ideal times, the execution point waiting in the delay queue, and events published"></svg></div>
+  <div class="w-controls">
+    <div class="w-btns" role="group" aria-label="Next run computed from">
+      <button class="w-btn" data-from="t" aria-pressed="true">ComputeNext(t, …)</button>
+      <button class="w-btn" data-from="now" aria-pressed="false">ComputeNext(time.Now(), …)</button>
+    </div>
+  </div>
+  <div class="w-btns">
+    <button class="w-btn" data-act="play">Pause</button>
+    <button class="w-btn ghost" data-act="stall">Stall the worker for 3h</button>
+    <button class="w-btn ghost" data-act="update">Update crontab</button>
+    <button class="w-btn ghost" data-act="delete">Delete schedule</button>
+  </div>
+  <div class="w-readout sc-readout">
+    <div class="w-cell"><span>events published</span><b class="w-fwd" data-out="events">0</b></div>
+    <div class="w-cell"><span>stale runs ignored</span><b class="w-grad" data-out="ignored">0</b></div>
+    <div class="w-cell"><span>off the crontab by</span><b data-out="drift">0 min</b></div>
+  </div>
+  <p class="w-explain" data-out="log">Every hour the worker picks up the ready point, publishes the event, and enqueues the next point. 1 hour here takes 1.5 seconds.</p>
+</div>
+
+<style is:global>
+  [data-widget="schedule-chain"] .w-fig svg { max-width: 36rem; margin-inline: auto; }
+  .w .sc-readout { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .w .sc-lbl { fill: var(--color-dim); font: 13px var(--font-mono); }
+  .w .sc-grid { stroke: rgb(255 255 255 / 0.18); stroke-width: 1; }
+  .w .sc-now { stroke: var(--ok); stroke-width: 1.5; }
+  .w .sc-pending { fill: none; stroke: var(--grad); stroke-width: 2; }
+  .w .sc-pending.stale { stroke: var(--color-dim); stroke-dasharray: 3 2; }
+  .w .sc-event { fill: var(--fwd); }
+  .w .sc-x { stroke: var(--grad); stroke-width: 2; }
+  .w .sc-link { stroke: var(--grad); stroke-width: 1; stroke-dasharray: 2 3; fill: none; opacity: 0.6; }
+  .w .sc-stall { fill: rgb(255 180 92 / 0.1); }
+</style>
+
+<script>
+  import { $, animate, mountAll } from "../widget/widget";
+
+  const HOUR = 1.5, PAST = 7, FUTURE = 2.5;
+  const W = 440, H = 150, X0 = 12, X1 = W - 12, Y_GRID = 42, Y_Q = 78, Y_EV = 114;
+  const BURST_GAP = 0.15;
+  const NS = "http://www.w3.org/2000/svg";
+
+  type Point = { at: number; version: number };
+  type Mark = { at: number; kind: "event" | "ignored"; from?: number };
+
+  mountAll("schedule-chain", (root) => {
+    const svg = $<SVGSVGElement>(root, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const el = (tag: string, attrs: Record<string, string | number>, text?: string) => {
+      const e = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      if (text !== undefined) e.textContent = text;
+      svg.appendChild(e);
+      return e;
+    };
+    const out = (k: string, v: string) => ($(root, `[data-out="${k}"]`).textContent = v);
+    const log = (s: string) => out("log", s);
+
+    let now = 0, from: "t" | "now" = "t", hours = 1, version = 1, exists = true, anchor = 0;
+    let queue: Point[] = [{ at: HOUR, version: 1 }], marks: Mark[] = [], stalls: [number, number][] = [];
+    let stalledUntil = 0, nextWork = 0, events = 0, ignored = 0, drift = 0;
+
+    const interval = () => hours * HOUR;
+    const xOf = (t: number) => X0 + ((t - (now - PAST * HOUR)) / ((PAST + FUTURE) * HOUR)) * (X1 - X0);
+
+    const handle = (p: Point) => {
+      if (!exists) { ignored++; marks.push({ at: now, kind: "ignored" }); log("The point came due, but fetchSchedule found nothing: the schedule was deleted, so the handler returns without enqueueing. The chain just ends."); return; }
+      if (p.version !== version) { ignored++; marks.push({ at: now, kind: "ignored" }); log(`A point enqueued under version ${p.version} came due. The schedule is at version ${version} now, so the handler ignores it; the new chain carries on.`); return; }
+      events++;
+      const late = now - p.at;
+      marks.push({ at: now, kind: "event", from: p.at });
+      const next = (from === "t" ? p.at : now) + interval();
+      queue.push({ at: next, version });
+      const off = ((((next - anchor) % interval()) + interval()) % interval());
+      drift = Math.min(off, interval() - off) < 0.01 ? 0 : off;
+      if (late > 0.5 * HOUR) log(from === "t"
+        ? `This run was ${Math.round((late / HOUR) * 60)} min late. Next is computed from the scheduled t, which is already in the past, so it fires immediately: the queue catches up in a burst and the timeline stays on the crontab.`
+        : `This run was ${Math.round((late / HOUR) * 60)} min late. Next is computed from time.Now(), so every future run inherits the delay: the timeline is shifted for good.`);
+    };
+
+    const step = (dt: number) => {
+      now += dt;
+      if (now < stalledUntil || now < nextWork) return;
+      queue.sort((a, b) => a.at - b.at);
+      if (queue.length && queue[0].at <= now) { handle(queue.shift()!); nextWork = now + BURST_GAP; }
+      marks = marks.filter((m) => m.at > now - (PAST + 1) * HOUR);
+      stalls = stalls.filter(([, e]) => e > now - (PAST + 1) * HOUR);
+    };
+
+    const draw = () => {
+      svg.replaceChildren();
+      for (const [s, e] of stalls) el("rect", { x: xOf(s), y: 24, width: Math.max(0, xOf(e) - xOf(s)), height: H - 40, class: "sc-stall" });
+      el("text", { x: X1, y: Y_GRID - 12, class: "sc-lbl", "text-anchor": "end" }, "crontab");
+      el("text", { x: X1, y: Y_Q - 12, class: "sc-lbl", "text-anchor": "end" }, "delay queue");
+      el("text", { x: X1, y: Y_EV - 12, class: "sc-lbl", "text-anchor": "end" }, "events published");
+      if (exists) {
+        const first = anchor + Math.ceil((now - PAST * HOUR - anchor) / interval()) * interval();
+        for (let t = Math.max(anchor, first); t < now + FUTURE * HOUR; t += interval()) el("line", { x1: xOf(t), x2: xOf(t), y1: Y_GRID - 6, y2: Y_GRID + 6, class: "sc-grid" });
+      }
+      el("line", { x1: xOf(now), x2: xOf(now), y1: 20, y2: H - 14, class: "sc-now" });
+      el("text", { x: xOf(now) + 4, y: H - 4, class: "sc-lbl" }, "now");
+      for (const p of queue) el("circle", { cx: xOf(p.at), cy: Y_Q, r: 6, class: `sc-pending${p.version !== version || !exists ? " stale" : ""}` });
+      for (const m of marks) {
+        const x = xOf(m.at);
+        if (m.kind === "event") {
+          if (m.from !== undefined && Math.abs(m.from - m.at) > 0.05) el("path", { d: `M${xOf(m.from)},${Y_Q}L${x},${Y_EV}`, class: "sc-link" });
+          el("circle", { cx: x, cy: Y_EV, r: 4.5, class: "sc-event" });
+        } else {
+          el("path", { d: `M${x - 5},${Y_EV - 5}L${x + 5},${Y_EV + 5}M${x - 5},${Y_EV + 5}L${x + 5},${Y_EV - 5}`, class: "sc-x" });
+        }
+      }
+      out("events", String(events)); out("ignored", String(ignored));
+      out("drift", `${Math.round((drift / HOUR) * 60)} min`);
+      out("crontab", hours === 1 ? "@every 1h" : "@every 2h");
+      $<HTMLButtonElement>(root, '[data-act="delete"]').textContent = exists ? "Delete schedule" : "Recreate schedule";
+      $<HTMLButtonElement>(root, '[data-act="update"]').disabled = !exists;
+    };
+
+    root.querySelectorAll<HTMLButtonElement>("[data-from]").forEach((b) =>
+      b.addEventListener("click", () => {
+        from = b.dataset.from as typeof from;
+        root.querySelectorAll("[data-from]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+        log(from === "t" ? "Next run = scheduled time + interval. Now stall the worker." : "Next run = time.Now() + interval. Now stall the worker.");
+      }));
+    $(root, '[data-act="stall"]').addEventListener("click", () => {
+      const s = Math.max(now, stalledUntil);
+      stalledUntil = s + 3 * HOUR;
+      stalls.push([s, stalledUntil]);
+      log("The worker is stuck (a GC pause, a slow Kafka publish, a deploy). Points pile up as ready in the delay queue.");
+    });
+    $(root, '[data-act="update"]').addEventListener("click", () => {
+      hours = hours === 1 ? 2 : 1; version++; anchor = now; drift = 0;
+      queue.push({ at: now + interval(), version });
+      log(`Crontab changed to every ${hours}h: version ${version}, and its first point is enqueued. The old point is still in the queue; the handler will ignore it.`);
+    });
+    $(root, '[data-act="delete"]').addEventListener("click", () => {
+      if (exists) { exists = false; log("Deleted from storage. The delay queue still holds the next point; nothing removes it."); }
+      else { exists = true; version++; hours = 1; anchor = now; drift = 0; queue.push({ at: now + interval(), version }); log("createSchedule enqueues the first point, then saves the definition."); }
+    });
+
+    draw();
+    animate(root, (dt) => { step(dt); draw(); }, $<HTMLButtonElement>(root, '[data-act="play"]'));
+  });
+</script>
