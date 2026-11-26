@@ -8,6 +8,8 @@ tags: [golang, patterns, practices]
 no_toc: false
 ---
 
+import CancelTree from "../../../components/engineering/CancelTree.astro";
+
 One of the most important use-cases of context in Go is propagating/handling cancellation. Cancellation is the process of terminating or stopping the execution of a task or operation. With context, we can propagate cancellation signals across API boundaries and between goroutines to gracefully stop the execution of a task when it is no longer needed or when an error occurs.
 
 Context cancellation is a mechanism usually used to **inform goroutines in concurrent-safe way that they need to save or discard their work and safely exit.**
@@ -194,6 +196,10 @@ func main() {
 ```
 
 The same `ctx` value can be passed to database drivers, gRPC server instances, worker goroutines, etc. to signal a graceful shutdown across the whole system. 
+
+Here are the pieces from this post wired together. Cancel things and watch what stops, what doesn't, and what never hears about it:
+
+<CancelTree />
 
 ## Conclusion
 

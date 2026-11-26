@@ -1,0 +1,207 @@
+---
+import "../widget/widget.css";
+
+type Row = { id: string; depth: number; kind: "ctx" | "go"; code: string; action?: string };
+const TREES: { title: string; rows: Row[] }[] = [
+  {
+    title: "main()",
+    rows: [
+      { id: "sig", depth: 0, kind: "ctx", code: "signal.NotifyContext(bg, os.Interrupt)", action: "send SIGINT" },
+      { id: "wctx", depth: 1, kind: "ctx", code: "context.WithCancel(ctx)", action: "call cancel()" },
+      { id: "print", depth: 2, kind: "go", code: "go printTime(workerCtx)" },
+      { id: "legacy", depth: 2, kind: "go", code: "go legacyLoop() // never selects ctx.Done()" },
+      { id: "serve", depth: 1, kind: "go", code: "GracefulServe(ctx, srv)" },
+    ],
+  },
+  {
+    title: "POST /compute (net/http, from srv.BaseContext)",
+    rows: [
+      { id: "req", depth: 0, kind: "ctx", code: "r.Context()", action: "client disconnects" },
+      { id: "compute", depth: 1, kind: "go", code: "veryExpensiveComputation(ctx, …)" },
+      { id: "tmo", depth: 1, kind: "ctx", code: "context.WithTimeout(ctx, 3*time.Second)" },
+      { id: "db", depth: 2, kind: "go", code: "db.QueryContext(tctx, …)" },
+    ],
+  },
+];
+---
+
+<div class="w not-prose" data-widget="cancel-tree">
+  <span class="w-label">Two context trees · tap a context to cancel it</span>
+  <div class="ct-trees">
+    {TREES.map((t) => (
+      <div class="ct-tree">
+        <span class="ct-title">{t.title}</span>
+        {t.rows.map((r) =>
+          r.kind === "ctx" ? (
+            <button class="ct-row ctx" data-id={r.id} style={`--d:${r.depth}`}>
+              <code>{r.code}</code><span class="ct-act">{r.action}</span><span class="ct-st" data-st={r.id}></span>
+            </button>
+          ) : (
+            <div class="ct-row go" data-id={r.id} style={`--d:${r.depth}`}>
+              <code>{r.code}</code><span class="ct-st" data-st={r.id}></span>
+            </div>
+          ),
+        )}
+      </div>
+    ))}
+  </div>
+  <div class="w-controls">
+    <div class="w-btns"><button class="w-btn ghost" data-act="reset">Reset</button></div>
+  </div>
+  <div class="w-readout ct-readout">
+    <div class="w-cell"><span>goroutines running</span><b class="w-fwd" data-out="running"></b></div>
+    <div class="w-cell"><span>returned cleanly</span><b class="ct-ok" data-out="returned"></b></div>
+    <div class="w-cell"><span>leaked</span><b class="w-grad" data-out="leaked"></b></div>
+  </div>
+  <p class="w-explain" data-out="log"></p>
+</div>
+
+<style is:global>
+  .w .ct-trees { display: grid; gap: 1rem; }
+  @media (min-width: 48rem) { .w .ct-trees { grid-template-columns: 1fr 1fr; } }
+  .w .ct-tree { display: grid; gap: 0.35rem; align-content: start; }
+  .w .ct-title { font: 600 0.7rem var(--font-mono); color: var(--color-dim); letter-spacing: 0.06em; }
+  .w .ct-row {
+    --c: var(--fwd);
+    margin-left: calc(var(--d) * 1.1rem);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem;
+    padding: 0.45rem 0.65rem; border-radius: 0.5rem; text-align: left;
+    border: 1px solid var(--rule); border-left: 3px solid var(--c);
+    background: rgb(255 255 255 / 0.03); color: var(--color-fg);
+    font: 0.78rem/1.35 var(--font-mono); transition: border-color 0.2s, opacity 0.3s, background 0.2s;
+  }
+  .w .ct-row code { font: inherit; overflow-wrap: anywhere; background: none; padding: 0; border: 0; color: inherit; }
+  .w .ct-row.ctx { cursor: pointer; }
+  .w .ct-row.ctx:hover:not(:disabled) { background: rgb(255 255 255 / 0.07); }
+  .w .ct-row.go { --c: var(--ok); border-style: dashed; border-left-style: solid; }
+  .w .ct-act { font: 0.7rem var(--font-sans); color: var(--color-dim); text-decoration: underline dotted; }
+  .w .ct-st { margin-left: auto; font: 600 0.72rem var(--font-mono); color: var(--c); font-variant-numeric: tabular-nums; }
+  .w .ct-row.cancelled { --c: var(--grad); background: var(--grad-soft); cursor: default; }
+  .w .ct-row.cancelled .ct-act { display: none; }
+  .w .ct-row.returned { opacity: 0.45; --c: var(--color-dim); }
+  .w .ct-row.leaked { --c: var(--grad); animation: ct-pulse 1.2s ease-in-out infinite; }
+  .w .ct-row.flash { background: rgb(255 180 92 / 0.3); }
+  @keyframes ct-pulse { 50% { background: var(--grad-soft); } }
+  @media (prefers-reduced-motion: reduce) { .w .ct-row.leaked { animation: none; } }
+  .w .ct-readout { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .w .ct-ok { color: var(--ok); }
+</style>
+
+<script>
+  import { $, mountAll } from "../widget/widget";
+
+  const PARENT: Record<string, string | null> = { sig: null, wctx: "sig", print: "wctx", legacy: "wctx", serve: "sig", req: null, compute: "req", tmo: "req", db: "tmo" };
+  const GOROUTINES = ["print", "legacy", "serve", "compute", "db"];
+  const TIMEOUT_S = 3, COMPUTE_TOTAL = 100_000, COMPUTE_RATE = 12_000, DB_S = 5, HOP_MS = 220;
+  const INTRO = "Each box with a dashed border is a goroutine. A context's Done() closes when it, or any ancestor, is cancelled. The goroutine only stops if it is selecting on Done().";
+
+  type Go = { state: "running" | "returned" | "leaked"; n: number; t: number };
+
+  mountAll("cancel-tree", (root) => {
+    const row = (id: string) => $(root, `.ct-row[data-id="${id}"]`);
+    const st = (id: string, s: string) => ($(root, `[data-st="${id}"]`).textContent = s);
+    const log = (s: string) => ($(root, '[data-out="log"]').textContent = s);
+    const children = (id: string) => Object.keys(PARENT).filter((k) => PARENT[k] === id);
+
+    let err: Record<string, string> = {}, gos: Record<string, Go> = {}, tmoLeft = TIMEOUT_S, timers: number[] = [];
+
+    const reset = () => {
+      timers.forEach(clearTimeout); timers = [];
+      err = {}; tmoLeft = TIMEOUT_S;
+      gos = Object.fromEntries(GOROUTINES.map((g) => [g, { state: "running", n: 0, t: 0 }]));
+      root.querySelectorAll<HTMLElement>(".ct-row").forEach((r) => { r.classList.remove("cancelled", "returned", "leaked", "flash"); if (r instanceof HTMLButtonElement) r.disabled = false; });
+      log(INTRO);
+      draw();
+    };
+
+    const finish = (g: string, how: string) => {
+      if (gos[g].state !== "running") return;
+      gos[g].state = "returned";
+      row(g).classList.add("returned");
+      st(g, how);
+    };
+
+    const notify = (g: string, why: string) => {
+      if (gos[g].state !== "running") return;
+      if (g === "legacy") { gos[g].state = "leaked"; row(g).classList.add("leaked"); st(g, "still spinning"); return; }
+      const how = g === "serve" ? "srv.Shutdown(…)" : g === "compute" ? `stopped at i = ${Math.floor(gos[g].n).toLocaleString()}` : g === "db" ? `ctx.Err(): ${why}` : "return";
+      timers.push(window.setTimeout(() => { finish(g, how); draw(); }, 160));
+    };
+
+    const cancel = (id: string, why: string) => {
+      if (err[id]) return;
+      err[id] = why;
+      const r = row(id) as HTMLButtonElement;
+      r.classList.add("cancelled", "flash"); r.disabled = true;
+      timers.push(window.setTimeout(() => r.classList.remove("flash"), 300));
+      st(id, why);
+      for (const c of children(id)) {
+        timers.push(window.setTimeout(() => { GOROUTINES.includes(c) ? notify(c, why) : cancel(c, why); draw(); }, HOP_MS));
+      }
+      draw();
+    };
+
+    const MESSAGES: Record<string, string> = {
+      sig: "SIGINT cancels the signal context, and Done() closes all the way down: printTime returns and GracefulServe calls srv.Shutdown. legacyLoop never looks at ctx, so it keeps running: a leaked goroutine. The request tree on the other side is untouched. net/http builds request contexts from srv.BaseContext (Background by default); Shutdown waits for in-flight requests instead of cancelling them.",
+      wctx: "cancel() closes workerCtx.Done(). printTime returns; legacyLoop doesn't notice. The parent signal context is unaffected: cancellation only flows down the tree.",
+      req: "The client went away, so net/http cancels r.Context(). The compute loop stops where it is, and the timeout context below inherits the cancellation: the query sees context.Canceled, not DeadlineExceeded.",
+      tmo: "The timeout context is cancelled early. The db query below it stops; r.Context() and the compute loop keep going.",
+    };
+
+    root.querySelectorAll<HTMLButtonElement>(".ct-row.ctx").forEach((b) =>
+      b.addEventListener("click", () => {
+        const id = b.dataset.id!;
+        const tmoFired = !!err.tmo;
+        cancel(id, "context canceled");
+        log(id === "req" && tmoFired
+          ? "The client went away, so net/http cancels r.Context() and the compute loop stops where it is. The timeout context below had already fired with DeadlineExceeded, so it keeps that error."
+          : MESSAGES[id]);
+      }));
+    $(root, '[data-act="reset"]').addEventListener("click", reset);
+
+    const draw = () => {
+      const g = gos;
+      if (g.print.state === "running") st("print", `printed ${g.print.n} lines`);
+      if (g.legacy.state === "running") st("legacy", `${Math.floor(g.legacy.n).toLocaleString()} spins`);
+      if (g.legacy.state === "leaked") st("legacy", `leaked · ${Math.floor(g.legacy.n).toLocaleString()} spins`);
+      if (g.serve.state === "running") st("serve", "serving :8080");
+      if (g.compute.state === "running") st("compute", `i = ${Math.floor(g.compute.n).toLocaleString()} / ${COMPUTE_TOTAL.toLocaleString()}`);
+      if (g.db.state === "running") st("db", `querying ${g.db.t.toFixed(1)}s`);
+      if (!err.tmo) st("tmo", `${Math.max(0, tmoLeft).toFixed(1)}s left`);
+      if (!err.sig) st("sig", "");
+      if (!err.wctx) st("wctx", "");
+      if (!err.req) st("req", "");
+      const vals = Object.values(g);
+      $(root, '[data-out="running"]').textContent = String(vals.filter((v) => v.state !== "returned").length);
+      $(root, '[data-out="returned"]').textContent = String(vals.filter((v) => v.state === "returned").length);
+      $(root, '[data-out="leaked"]').textContent = String(vals.filter((v) => v.state === "leaked").length);
+    };
+
+    const step = (dt: number) => {
+      const g = gos;
+      if (g.print.state === "running") { g.print.t += dt; g.print.n = Math.floor(g.print.t); }
+      if (g.legacy.state !== "returned") g.legacy.n += dt * 4_000_000;
+      if (g.compute.state === "running") {
+        g.compute.n = Math.min(COMPUTE_TOTAL, g.compute.n + dt * COMPUTE_RATE);
+        if (g.compute.n >= COMPUTE_TOTAL) { finish("compute", "returned result"); log("The compute loop finished all 100,000 iterations and returned its result. Reset and disconnect the client earlier to save the work."); }
+      }
+      if (g.db.state === "running") g.db.t = Math.min(DB_S, g.db.t + dt);
+      if (!err.tmo) {
+        tmoLeft -= dt;
+        if (tmoLeft <= 0) { cancel("tmo", "deadline exceeded"); log("3 seconds passed, so WithTimeout cancels itself with context.DeadlineExceeded. The 5-second query is abandoned; r.Context() and the compute loop are unaffected."); }
+      }
+      draw();
+    };
+
+    let visible = false, last = 0, raf = 0;
+    const frame = (t: number) => {
+      step(Math.min(0.1, (t - last) / 1000)); last = t;
+      raf = visible ? requestAnimationFrame(frame) : 0;
+    };
+    new IntersectionObserver(([e]) => {
+      visible = e.isIntersecting;
+      if (visible && !raf) { last = performance.now(); raf = requestAnimationFrame(frame); }
+    }, { threshold: 0.4 }).observe(root);
+    reset();
+  });
+</script>
