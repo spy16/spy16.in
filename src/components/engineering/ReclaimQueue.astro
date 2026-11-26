@@ -1,0 +1,200 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="reclaim-queue">
+  <span class="w-label"><code>delay_set</code>, scored by ready time · tap a worker to crash or restart it</span>
+  <div class="w-fig"><svg role="img" aria-label="A timeline of jobs in a Redis sorted set, a now line, and three workers polling it"></svg></div>
+  <div class="w-controls">
+    <label class="w-ctl">reclaim_ttl = <b data-out="ttl"></b><input data-in="ttl" type="range" min="1" max="12" step="1" value="8" /></label>
+    <div class="w-btns"><button class="w-btn" data-act="play" aria-pressed="true">Pause</button><button class="w-btn ghost" data-act="reset">Reset</button></div>
+  </div>
+  <div class="w-readout rq-readout">
+    <div class="w-cell"><span>jobs done</span><b class="rq-ok" data-out="done">0</b></div>
+    <div class="w-cell"><span>reclaimed after a crash</span><b class="w-fwd" data-out="reclaimed">0</b></div>
+    <div class="w-cell"><span>processed twice</span><b class="w-grad" data-out="dupes">0</b></div>
+  </div>
+  <p class="w-log" aria-live="polite" data-out="log">Workers poll every second: ZRANGE -inf now, then push each claimed job's score to now + reclaim_ttl.</p>
+</div>
+
+<style is:global>
+  [data-widget="reclaim-queue"] .w-fig svg { max-width: 36rem; margin-inline: auto; touch-action: manipulation; }
+  .w .rq-readout { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .w .rq-ok { color: var(--ok); }
+  .w .rq-ready { fill: rgb(111 211 154 / 0.08); }
+  .w .rq-now { stroke: var(--ok); stroke-width: 1.5; }
+  .w .rq-axis { stroke: var(--rule); }
+  .w .rq-lbl { fill: var(--color-dim); font: 12px var(--font-mono); }
+  .w .rq-lbl.ok { fill: var(--ok); }
+  .w .rq-job { fill: rgb(255 255 255 / 0.55); transition: fill 0.2s; }
+  .w .rq-job.claimed { stroke: var(--color-ink); stroke-width: 1.5; }
+  .w .rq-worker rect.box { fill: rgb(255 255 255 / 0.03); stroke: var(--rule); }
+  .w .rq-worker.dead rect.box { stroke: var(--grad); stroke-dasharray: 4 3; }
+  .w .rq-worker { cursor: pointer; }
+  .w .rq-worker .name { font: 600 13px var(--font-mono); }
+  .w .rq-worker .status { fill: var(--color-dim); font: 11px var(--font-mono); }
+  .w .rq-worker .bar { fill: rgb(255 255 255 / 0.08); }
+  .w .rq-tick { fill: var(--ok); font: 700 13px var(--font-mono); }
+</style>
+
+<script>
+  import { $, mountAll, reduceMotion } from "../widget/widget";
+
+  const W = 480, H = 232;
+  const X0 = 16, X1 = W - 16, PAST = 6, FUTURE = 22;
+  const LANES = [44, 66, 88, 110];
+  const POLL = 1, BATCH = 2, MAX_JOBS = 12;
+  const WORKER_RGB = ["120,168,255", "196,140,255", "79,209,255"];
+  const NS = "http://www.w3.org/2000/svg";
+
+  type Job = { id: number; score: number; work: number; lane: number; by: number | null; running: Set<number>; claims: number; el: SVGCircleElement };
+  type Worker = { alive: boolean; batch: Job[]; job: Job | null; left: number; nextPoll: number; g: SVGGElement; status: SVGTextElement; bar: SVGRectElement };
+
+  mountAll("reclaim-queue", (root) => {
+    const svg = $<SVGSVGElement>(root, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const el = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>, parent: Element = svg, text?: string) => {
+      const e = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      if (text !== undefined) e.textContent = text;
+      parent.appendChild(e);
+      return e;
+    };
+    const out = (k: string, v: string) => ($(root, `[data-out="${k}"]`).textContent = v);
+    const ttlIn = $<HTMLInputElement>(root, '[data-in="ttl"]');
+    const playBtn = $<HTMLButtonElement>(root, '[data-act="play"]');
+    const xOf = (score: number) => X0 + ((score - (now - PAST)) / (PAST + FUTURE)) * (X1 - X0);
+    const NOW_X = X0 + (PAST / (PAST + FUTURE)) * (X1 - X0);
+
+    el("rect", { x: X0, y: 30, width: NOW_X - X0, height: 92, class: "rq-ready" });
+    el("line", { x1: X0, x2: X1, y1: 122, y2: 122, class: "rq-axis" });
+    el("line", { x1: NOW_X, x2: NOW_X, y1: 26, y2: 126, class: "rq-now" });
+    el("text", { x: X0 + 2, y: 20, class: "rq-lbl ok" }, svg, "ready");
+    el("text", { x: NOW_X + 4, y: 20, class: "rq-lbl ok" }, svg, "now");
+    el("text", { x: X1, y: 20, class: "rq-lbl", "text-anchor": "end" }, svg, "score = ready time →");
+    [10, 20].forEach((s) => el("text", { x: NOW_X + (s / (PAST + FUTURE)) * (X1 - X0), y: 138, class: "rq-lbl", "text-anchor": "middle" }, svg, `+${s}s`));
+    const gJobs = el("g", {}), gTicks = el("g", {});
+
+    let now = 0, nextId = 1, nextSpawn = 0, done = 0, reclaimed = 0, dupes = 0;
+    let jobs: Job[] = [];
+    const workers: Worker[] = [0, 1, 2].map((i) => {
+      const bw = (W - 32 - 16) / 3, x = 16 + i * (bw + 8), y = 156;
+      const g = el("g", { class: "rq-worker", role: "button", tabindex: 0, "aria-label": `worker ${i + 1}: crash or restart` });
+      el("rect", { x, y, width: bw, height: 64, rx: 8, class: "box" }, g);
+      el("circle", { cx: x + 14, cy: y + 18, r: 5, fill: `rgb(${WORKER_RGB[i]})` }, g);
+      el("text", { x: x + 25, y: y + 22, class: "name", fill: `rgb(${WORKER_RGB[i]})` }, g, `worker ${i + 1}`);
+      const status = el("text", { x: x + 10, y: y + 42, class: "status" }, g, "polling");
+      el("rect", { x: x + 10, y: y + 50, width: bw - 20, height: 5, rx: 2.5, class: "bar" }, g);
+      const bar = el("rect", { x: x + 10, y: y + 50, width: 0, height: 5, rx: 2.5, fill: `rgb(${WORKER_RGB[i]})` }, g);
+      const w: Worker = { alive: true, batch: [], job: null, left: 0, nextPoll: i * 0.33, g, status, bar };
+      const toggle = () => {
+        w.alive = !w.alive;
+        g.classList.toggle("dead", !w.alive);
+        if (!w.alive) {
+          const held = [...w.batch, ...(w.job ? [w.job] : [])];
+          held.forEach((j) => j.running.delete(i));
+          w.batch = []; w.job = null;
+          log(held.length
+            ? `worker ${i + 1} crashed holding ${held.map((j) => `#${j.id}`).join(", ")}. They stay in the set with bumped scores and come back when that time passes.`
+            : `worker ${i + 1} crashed while idle. Nothing is lost.`);
+        } else { w.nextPoll = now; log(`worker ${i + 1} restarted and starts polling.`); }
+        kick();
+      };
+      g.addEventListener("click", toggle);
+      g.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter" || (e as KeyboardEvent).key === " ") { e.preventDefault(); toggle(); } });
+      return w;
+    });
+
+    const log = (s: string) => out("log", s);
+    const ttl = () => +ttlIn.value;
+
+    const spawn = () => {
+      if (jobs.length >= MAX_JOBS) return;
+      const used = new Set(jobs.filter((j) => j.score > now + 8).map((j) => j.lane));
+      const lane = [0, 1, 2, 3].find((l) => !used.has(l)) ?? nextId % 4;
+      const j: Job = { id: nextId++, score: now + 6 + Math.random() * 14, work: 1.5 + Math.random() * 3, lane, by: null, running: new Set(), claims: 0, el: el("circle", { r: 7, class: "rq-job" }, gJobs) };
+      jobs.push(j);
+    };
+
+    const poll = (i: number) => {
+      const w = workers[i];
+      const ready = jobs.filter((j) => j.score <= now).sort((a, b) => a.score - b.score).slice(0, BATCH);
+      for (const j of ready) {
+        if (j.claims > 0) {
+          const stillRunning = [...j.running].some((k) => workers[k].alive);
+          if (stillRunning) { dupes++; log(`#${j.id} came back while worker ${[...j.running][0] + 1} was still running it: processed twice. Its run time beat reclaim_ttl.`); }
+          else { reclaimed++; log(`worker ${i + 1} reclaimed #${j.id}: its last owner crashed, and its bumped score has come due.`); }
+        }
+        j.claims++; j.by = i; j.score = now + ttl(); j.running.add(i);
+        w.batch.push(j);
+      }
+    };
+
+    const finish = (i: number, j: Job) => {
+      j.running.delete(i);
+      if (jobs.includes(j)) {
+        jobs = jobs.filter((x) => x !== j);
+        j.el.remove();
+        done++;
+        const t = el("text", { x: xOf(j.score), y: LANES[j.lane] + 4, class: "rq-tick", "text-anchor": "middle" }, gTicks, "✓ ZREM");
+        setTimeout(() => t.remove(), 700);
+      }
+    };
+
+    const step = (dt: number) => {
+      now += dt;
+      if (now >= nextSpawn) { spawn(); nextSpawn = now + 1 + Math.random() * 1.2; }
+      workers.forEach((w, i) => {
+        if (!w.alive) return;
+        if (!w.job && w.batch.length) { w.job = w.batch.shift()!; w.left = w.job.work; }
+        if (w.job) {
+          w.left -= dt;
+          if (w.left <= 0) { finish(i, w.job); w.job = null; }
+        } else if (now >= w.nextPoll) { poll(i); w.nextPoll = now + POLL; }
+      });
+    };
+
+    const draw = () => {
+      for (const j of jobs) {
+        const x = xOf(j.score);
+        j.el.setAttribute("cx", String(Math.max(X0 + 7, x)));
+        j.el.setAttribute("cy", String(LANES[j.lane]));
+        const owner = [...j.running].find((k) => workers[k].alive);
+        j.el.classList.toggle("claimed", owner !== undefined);
+        j.el.style.fill = owner !== undefined ? `rgb(${WORKER_RGB[owner]})` : "";
+      }
+      workers.forEach((w, i) => {
+        const bw = (W - 48) / 3 - 20;
+        w.status.textContent = !w.alive ? "crashed ✕" : w.job ? `running #${w.job.id}${w.batch.length ? ` (+${w.batch.length})` : ""}` : "polling";
+        w.bar.setAttribute("width", String(w.job ? bw * (1 - Math.max(0, w.left) / w.job.work) : 0));
+        w.g.setAttribute("aria-label", `worker ${i + 1}, ${w.status.textContent}: tap to ${w.alive ? "crash" : "restart"}`);
+      });
+      out("done", String(done)); out("reclaimed", String(reclaimed)); out("dupes", String(dupes));
+      out("ttl", `${ttl()} s`);
+    };
+
+    const reset = () => {
+      jobs.forEach((j) => j.el.remove());
+      jobs = []; now = 0; nextId = 1; nextSpawn = 0; done = reclaimed = dupes = 0;
+      workers.forEach((w, i) => { w.alive = true; w.batch = []; w.job = null; w.nextPoll = i * 0.33; w.g.classList.remove("dead"); });
+      for (let k = 0; k < 5; k++) { spawn(); jobs[k].score = now - 1 + k * 1.6; }
+      log("Workers poll every second: ZRANGE -inf now, then push each claimed job's score to now + reclaim_ttl.");
+      draw();
+    };
+
+    let playing = !reduceMotion(), visible = false, last = 0, raf = 0;
+    const frame = (t: number) => {
+      const dt = Math.min(0.1, (t - last) / 1000); last = t;
+      step(dt); draw();
+      raf = playing && visible ? requestAnimationFrame(frame) : 0;
+    };
+    const kick = () => { if (playing && visible && !raf) { last = performance.now(); raf = requestAnimationFrame(frame); } else draw(); };
+    const setPlaying = (p: boolean) => { playing = p; playBtn.textContent = p ? "Pause" : "Play"; playBtn.setAttribute("aria-pressed", String(p)); kick(); };
+    new IntersectionObserver(([e]) => { visible = e.isIntersecting; kick(); }).observe(root);
+    ttlIn.addEventListener("input", draw);
+    playBtn.addEventListener("click", () => setPlaying(!playing));
+    $(root, '[data-act="reset"]').addEventListener("click", reset);
+    reset();
+    setPlaying(playing);
+  });
+</script>
