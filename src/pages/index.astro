@@ -22,12 +22,12 @@ const legend = [
     <div class="scrim py-14 text-center sm:px-24 sm:py-20">
       <p class="mb-4 font-mono text-xs tracking-widest text-dim uppercase">you're in a corner of my brain</p>
       <h1 data-decode class="font-display text-5xl font-bold tracking-tight whitespace-pre text-fg [text-shadow:0_0_40px_rgb(120_140_255/.45)] sm:text-7xl">Hi, I am Prasad.</h1>
-      <p class="mx-auto mt-5 max-w-xl text-base text-balance text-dim sm:text-lg">
-        I build fast backends at Sahi, and write here about engineering and AI.
+      <p data-field-top class="mx-auto mt-5 max-w-xl text-base text-balance text-dim sm:text-lg">
+        I build fast backends at Sahi, and write here about engineering, AI and things that make me curious.
       </p>
     </div>
 
-    <details id="legend" open class="glass solid absolute bottom-20 left-1/2 w-max max-w-[calc(100vw-3rem)] -translate-x-1/2 bg-[rgb(8_10_20/.9)]! px-4 py-2.5 font-mono text-xs text-dim open:p-4 md:bottom-6 md:left-6 md:max-w-xs md:translate-x-0">
+    <details id="legend" open data-field-bottom class="glass solid absolute bottom-20 left-1/2 w-max max-w-[calc(100vw-3rem)] -translate-x-1/2 bg-[rgb(8_10_20/.9)]! px-4 py-2.5 font-mono text-xs text-dim open:p-4 md:bottom-6 md:left-6 md:max-w-xs md:translate-x-0">
       <summary class="cursor-pointer text-fg">how to read this</summary>
       <ul class="mt-3 flex flex-col gap-2">
         {legend.map(([g, what, means]) => <li class="grid grid-cols-[1.25rem_1fr] gap-2"><span class="text-fg">{g}</span><span><span class="text-fg/80">{what}</span>: {means}</span></li>)}
@@ -38,7 +38,7 @@ const legend = [
       if (!matchMedia("(min-width: 48rem)").matches) document.getElementById("legend").open = false;
     </script>
 
-    <div class="absolute inset-x-0 bottom-6 flex justify-center gap-2 font-mono text-xs md:left-auto md:right-6 md:inset-x-auto">
+    <div data-field-bottom class="absolute inset-x-0 bottom-6 flex justify-center gap-2 font-mono text-xs md:left-auto md:right-6 md:inset-x-auto">
       {
         lobes.map((l) => (
           <a href={`/posts/${l.id}/`} data-lobe={l.id} class={`lobe-${l.id} glass rounded-full! px-3 py-1.5 text-(--lobe)`}>

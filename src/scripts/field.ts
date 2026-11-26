@@ -389,7 +389,12 @@ export function mount(cv: HTMLCanvasElement, brain: Brain) {
       }
       if (split) off.x = W * 0.26;
     } else if (mode.kind === "home" && H > W) {
-      z = 0.92; off.y = H * 0.12;
+      const ys = N.filter((n) => n.kind === "post").map((n) => n.by);
+      const lo = Math.min(...ys) - 48, hi = Math.max(...ys) + 16;
+      const top = edgeOf("[data-field-top]", "bottom") ?? H * 0.45, bottom = edgeOf("[data-field-bottom]", "top") ?? H - 140;
+      z = Math.min(0.92, Math.max(0.5, (bottom - top) / (hi - lo)));
+      y = (lo + hi) / 2;
+      off.y = (top + bottom) / 2 - H / 2;
     }
     cam.tx = x - off.x / z; cam.ty = y - off.y / z; cam.tz = z;
     boostLobe = lobe;
@@ -508,6 +513,12 @@ function sprite(c: string, stops: number[][]) {
   g.fillStyle = gr;
   g.fillRect(0, 0, 64, 64);
   return s;
+}
+
+// Page-space edge (top of the page = top of the fixed canvas) of the outermost matching element.
+function edgeOf(sel: string, side: "top" | "bottom"): number | null {
+  const ys = [...document.querySelectorAll(sel)].map((el) => el.getBoundingClientRect()[side] + scrollY);
+  return ys.length ? (side === "top" ? Math.min(...ys) : Math.max(...ys)) : null;
 }
 
 function nearestLobe(angle: number) {
