@@ -1,0 +1,56 @@
+---
+title: "Why my tea cup turns into a star"
+description: "Hot tea, a snap-on lid and a thin plastic wall: the steam inside condenses, the air outside pushes in, and the wall picks a Fourier mode to buckle into."
+pubDate: 2026-11-27
+publish: true
+tags: [physics, til]
+---
+
+import TeaBuckling from "../../../components/engineering/TeaBuckling.astro";
+
+We ordered masala dose and tea for breakfast (sorry if I'm making you jealous). The hot tea comes in a round plastic container with a snap-on lid. Oddly, every time we order, the container arrives deformed into a sort of star shape.
+
+I got curious, started searching and asked AI to explain. Apparently it's a phenomenon called **circumferential shell buckling**, and the star is a Fourier mode. Here's the whole story.
+
+## Where the squeeze comes from
+
+The tea is packed close to boiling, and the lid traps a pocket of air above it. At 85 °C that pocket is more than half steam: water vapour alone pushes with about 58 kPa, over half an atmosphere.
+
+Then the tea cools. The steam condenses back into water and the remaining air contracts. By 50 °C the pressure inside has fallen to about half an atmosphere. The air outside now pushes on the wall about 50 kPa harder than the air inside, roughly 5 tonnes per square metre, on a wall under half a millimetre thick, made of plastic the tea has just softened.
+
+Hot-filled juice bottles have exactly this problem. Many of them have flat "vacuum panels" moulded into their sides so they can cave in politely instead of randomly.
+
+## Why a star, and not a crumple
+
+A thin cylinder squeezed from outside doesn't shrink evenly. It snaps into a wavy shape, and any wavy dent around the circumference can be written as a sum of Fourier modes:
+
+```
+w(θ) = Σ Aₙ · cos(nθ)
+```
+
+Mode `n` puts `n` lobes around the cup: `n = 2` is an oval, `n = 3` a rounded triangle, and so on. Each mode needs a different pressure to get going, and whichever mode gives up first wins. Two costs compete:
+
+- **Few, wide lobes** have to stretch the wall along its height, because the base and the lid hold the top and bottom in place. Stretching a wall is expensive.
+- **Many, narrow lobes** have to bend the wall into tight curves, and bending gets expensive fast as `n` grows.
+
+The cheapest compromise sits somewhere in the middle. For a cup of radius `R`, height `L` and wall thickness `t`, it works out to roughly
+
+```
+n ≈ 2.74 · √(R/L) · (R/t)^¼
+```
+
+which for a typical tea cup is about 7 or 8 lobes. A star.
+
+## Cool your own cup
+
+The bars are the pressure needed for each number of lobes. The dashed line is the vacuum inside, rising as the tea cools. Press **Let it cool**, then change the cup:
+
+<TeaBuckling />
+
+A taller cup makes fewer, longer lobes. A thinner wall makes more of them, and gives up at a much lower pressure. With any realistic wall, the tea only has to cool a few degrees before the cup loses.
+
+## What I'm hand-waving
+
+- The formula is for a perfect cylinder. Real cups are tapered, have a stiff rim and a moulded base, and tiny dents help buckling start even earlier.
+- Once the wall caves in, the volume inside shrinks and relieves part of the vacuum, so the dents stop at a finite depth.
+- Hot plastic creeps, so some of the star can stay even after you pop the lid open.
