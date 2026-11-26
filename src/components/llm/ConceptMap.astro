@@ -1,5 +1,5 @@
 ---
-import "./widget.css";
+import "../widget/widget.css";
 import { SERIES } from "./lessons";
 import { getSeries } from "../../lib/brain";
 
@@ -44,7 +44,7 @@ const published = (await getSeries(SERIES)).map((p) => p.data.part ?? 0);
 <script>
   import * as d3 from "d3";
   import { BANDS, CONCEPTS, type Concept } from "./lessons";
-  import { $, mountAll } from "./widget";
+  import { $, mountAll } from "../widget/widget";
 
   type Placed = Concept & { x: number; y: number; w: number };
   const W = 1000, BH = 104, TOP = 6, PAD = 24, NH = 40;

@@ -1,5 +1,5 @@
 ---
-import "./widget.css";
+import "../widget/widget.css";
 ---
 
 <div class="w not-prose" data-widget="backprop">
@@ -21,7 +21,7 @@ import "./widget.css";
 
 <script>
   import * as d3 from "d3";
-  import { $, fmt, mountAll } from "./widget";
+  import { $, fmt, mountAll } from "../widget/widget";
 
   type Key = "a" | "b" | "c" | "f" | "e" | "d" | "L";
   type Node = { name: string; x: number; y: number; op?: "×" | "+"; ins?: [Key, Key] };

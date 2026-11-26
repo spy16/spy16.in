@@ -1,5 +1,5 @@
 ---
-import "./widget.css";
+import "../widget/widget.css";
 ---
 
 <div class="w not-prose" data-widget="slope">
@@ -25,7 +25,7 @@ import "./widget.css";
 
 <script>
   import * as d3 from "d3";
-  import { $, fmt, mountAll, reduceMotion } from "./widget";
+  import { $, fmt, mountAll, reduceMotion } from "../widget/widget";
 
   const f = (x: number) => (x - 2) ** 2 + 1;
   const df = (x: number) => 2 * (x - 2);
