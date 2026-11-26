@@ -1,0 +1,146 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="consumer-group">
+  <span class="w-label">topic <code>til-kafka</code> · consumer group <code>billing</code> · range assignor</span>
+  <div class="cg-controls">
+    <div class="cg-stepper"><span>partitions</span><button class="w-btn ghost" data-act="p-" aria-label="fewer partitions">−</button><b data-out="p"></b><button class="w-btn ghost" data-act="p+" aria-label="more partitions">+</button></div>
+    <div class="cg-stepper"><span>consumers</span><button class="w-btn ghost" data-act="c-" aria-label="fewer consumers">−</button><b data-out="c"></b><button class="w-btn ghost" data-act="c+" aria-label="more consumers">+</button></div>
+  </div>
+  <div class="cg-consumers" data-out="consumers"></div>
+  <div class="cg-parts" data-out="parts"></div>
+  <div class="w-readout cg-readout">
+    <div class="w-cell"><span>total lag</span><b class="w-grad" data-out="lag">0</b></div>
+    <div class="w-cell"><span>idle consumers</span><b data-out="idle">0</b></div>
+    <div class="w-cell"><span>rebalances</span><b class="w-fwd" data-out="rebalances">0</b></div>
+  </div>
+  <p class="w-explain" data-out="log">The producer writes 12 messages/s round-robin; each consumer can process 5/s. Tap a consumer to stall it.</p>
+</div>
+
+<style is:global>
+  .w .cg-controls { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; }
+  .w .cg-stepper { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--color-dim); }
+  .w .cg-stepper .w-btn { padding: 0.25rem 0.7rem; }
+  .w .cg-stepper b { font: 600 1rem var(--font-mono); color: var(--color-fg); min-width: 1.5ch; text-align: center; }
+  .w .cg-consumers { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .w .cg-chip { --c: var(--fwd); font: 600 0.75rem var(--font-mono); padding: 0.3rem 0.6rem; border-radius: 99px; border: 1px solid var(--c); color: var(--c); background: transparent; cursor: pointer; }
+  .w .cg-chip.idle { --c: var(--color-dim); border-style: dashed; }
+  .w .cg-chip.stalled { --c: var(--grad); animation: cg-blink 0.8s steps(2) infinite; }
+  .w .cg-chip.kicked { --c: var(--grad); opacity: 0.5; text-decoration: line-through; }
+  @keyframes cg-blink { 50% { opacity: 0.5; } }
+  .w .cg-parts { display: grid; gap: 0.3rem; font: 0.75rem var(--font-mono); }
+  .w .cg-part { display: grid; grid-template-columns: 2.2rem 1fr 4.5rem 5.5rem; gap: 0.5rem; align-items: center; color: var(--color-dim); }
+  .w .cg-bar { height: 0.55rem; border-radius: 99px; background: rgb(255 255 255 / 0.06); overflow: hidden; }
+  .w .cg-bar i { display: block; height: 100%; background: var(--grad); border-radius: inherit; transition: width 0.2s; }
+  .w .cg-owner { text-align: right; color: var(--c, var(--color-dim)); }
+  .w .cg-readout { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .w.cg-rebalancing .cg-parts { opacity: 0.45; }
+</style>
+
+<script>
+  import { $, animate, mountAll } from "../widget/widget";
+
+  const PRODUCE = 12, CONSUME = 5, MAX_POLL_S = 3, REBALANCE_S = 1.2, LAG_FULL = 60, MAX_N = 8;
+  const COLORS = ["120,168,255", "196,140,255", "79,209,255", "111,211,154", "255,140,180", "230,230,120", "255,180,92", "160,200,255"];
+
+  type Consumer = { id: number; stalledAt: number | null; kicked: boolean };
+
+  mountAll("consumer-group", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const log = (s: string) => (out("log").textContent = s);
+    let nParts = 6, consumers: Consumer[] = [], nextId = 1, now = 0, acc = 0, rr = 0, rebalances = 0, rebalanceUntil = 0;
+    let produced: number[] = [], consumed: number[] = [], owner: (number | null)[] = [];
+    let lagCells: HTMLElement[] = [], bars: HTMLElement[] = [];
+    const members = () => consumers.filter((c) => !c.kicked);
+    const colorOf = (id: number) => `rgb(${COLORS[(id - 1) % COLORS.length]})`;
+
+    const assign = () => {
+      const m = members();
+      owner = Array(nParts).fill(null);
+      const per = m.length ? Math.floor(nParts / m.length) : 0, extra = m.length ? nParts % m.length : 0;
+      let p = 0;
+      m.forEach((c, i) => { for (let k = 0; k < per + (i < extra ? 1 : 0); k++) owner[p++] = c.id; });
+    };
+    const rebalance = (why: string) => {
+      rebalances++; rebalanceUntil = now + REBALANCE_S; assign();
+      const idle = members().filter((c) => !owner.includes(c.id)).length;
+      log(`${why} The group rebalances: every consumer stops, gives up its partitions and gets a new set.${idle ? ` ${idle} consumer${idle > 1 ? "s get" : " gets"} nothing: a partition goes to at most one consumer in a group.` : ""}`);
+      render();
+    };
+
+    const render = () => {
+      out("p").textContent = String(nParts);
+      out("c").textContent = String(consumers.length);
+      out("consumers").replaceChildren(...consumers.map((c) => {
+        const b = document.createElement("button");
+        const idle = !c.kicked && !owner.includes(c.id);
+        const state = c.kicked ? "kicked" : c.stalledAt !== null ? "stalled" : idle ? "idle" : "";
+        b.className = `cg-chip ${state}`;
+        if (!state) b.style.setProperty("--c", colorOf(c.id));
+        b.textContent = `consumer-${c.id}${c.kicked ? " · tap to rejoin" : c.stalledAt !== null ? " · stalled" : idle ? " · idle" : ""}`;
+        b.addEventListener("click", () => {
+          if (c.kicked) { c.kicked = false; c.stalledAt = null; rebalance(`consumer-${c.id} rejoined.`); return; }
+          if (c.stalledAt !== null) { c.stalledAt = null; log(`consumer-${c.id} recovered and polls again in time.`); }
+          else { c.stalledAt = now; log(`consumer-${c.id} is stuck in a slow process() call. Its partitions build lag, and if it doesn't poll() again within max.poll.interval.ms (3 s here), it's out.`); }
+          render();
+        });
+        return b;
+      }));
+      lagCells = []; bars = [];
+      out("parts").replaceChildren(...produced.map((_, p) => {
+        const row = document.createElement("div"); row.className = "cg-part";
+        const o = owner[p];
+        row.innerHTML = `<span>P${p}</span><div class="cg-bar"><i></i></div><span></span><span class="cg-owner"${o !== null ? ` style="--c:${colorOf(o)}"` : ""}>${o !== null ? `consumer-${o}` : "unassigned"}</span>`;
+        bars.push(row.querySelector("i")!); lagCells.push(row.children[2] as HTMLElement);
+        return row;
+      }));
+      update();
+    };
+
+    const update = () => {
+      root.classList.toggle("cg-rebalancing", now < rebalanceUntil);
+      let lag = 0;
+      produced.forEach((_, p) => {
+        const l = Math.max(0, Math.round(produced[p] - consumed[p])); lag += l;
+        lagCells[p].textContent = `lag ${l}`;
+        bars[p].style.width = `${Math.min(100, (l / LAG_FULL) * 100)}%`;
+      });
+      out("lag").textContent = String(lag);
+      out("idle").textContent = String(members().filter((c) => !owner.includes(c.id)).length);
+      out("rebalances").textContent = String(rebalances);
+    };
+
+    const step = (dt: number) => {
+      now += dt;
+      for (acc += PRODUCE * dt; acc >= 1; acc--) produced[rr++ % nParts]++;
+      for (const c of members()) {
+        if (c.stalledAt !== null && now - c.stalledAt > MAX_POLL_S) {
+          c.kicked = true;
+          rebalance(`consumer-${c.id} didn't call poll() within max.poll.interval.ms, so the coordinator kicked it out.`);
+        }
+      }
+      if (now < rebalanceUntil) return;
+      for (const c of members()) {
+        if (c.stalledAt !== null) continue;
+        const mine = owner.flatMap((o, p) => (o === c.id ? [p] : []));
+        for (const p of mine) consumed[p] = Math.min(produced[p], consumed[p] + (CONSUME * dt) / mine.length);
+      }
+    };
+
+    const setParts = (n: number) => {
+      while (produced.length < n) { produced.push(0); consumed.push(0); }
+      nParts = n;
+    };
+
+    $(root, '[data-act="c+"]').addEventListener("click", () => { if (consumers.length >= MAX_N) return; const c = { id: nextId++, stalledAt: null, kicked: false }; consumers.push(c); rebalance(`consumer-${c.id} joined.`); });
+    $(root, '[data-act="c-"]').addEventListener("click", () => { const c = consumers.pop(); if (!c) return; nextId = c.id; rebalance(`consumer-${c.id} left.`); });
+    $(root, '[data-act="p+"]').addEventListener("click", () => { if (nParts >= MAX_N) return; setParts(nParts + 1); rebalance("A partition was added."); });
+    $(root, '[data-act="p-"]').addEventListener("click", () => log("Kafka can add partitions to a topic but never remove them. To shrink, you create a new topic and migrate."));
+
+    setParts(nParts);
+    consumers = [1, 2, 3].map((id) => ({ id, stalledAt: null, kicked: false })); nextId = 4;
+    assign(); render();
+    animate(root, (dt) => { step(dt); update(); });
+  });
+</script>

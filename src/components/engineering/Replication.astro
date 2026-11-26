@@ -1,0 +1,145 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="replication">
+  <span class="w-label">partition <code>til-kafka-0</code> · replication factor 3 · producer with <code>acks=all</code></span>
+  <div class="rp-brokers" data-out="brokers"></div>
+  <div class="w-readout rp-readout">
+    <div class="w-cell"><span>leader broker</span><b class="w-fwd" data-out="leader"></b></div>
+    <div class="w-cell"><span>ISR brokers</span><b class="rp-ok" data-out="isr"></b></div>
+    <div class="w-cell"><span>high watermark</span><b data-out="hw"></b></div>
+  </div>
+  <p class="w-explain" data-out="log">The producer writes to the leader; followers fetch from it. A record is committed, and visible to consumers, once every in-sync replica has it: that offset is the high watermark.</p>
+  <p class="w-log">Solid cells are committed (at or below the high watermark). A follower that hasn't caught up within replica.lag.time.max.ms (2 s here) leaves the ISR.</p>
+</div>
+
+<style is:global>
+  .w .rp-brokers { display: grid; gap: 0.5rem; }
+  @media (min-width: 40rem) { .w .rp-brokers { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .w .rp-broker { border: 1px solid var(--rule); border-radius: 0.6rem; padding: 0.6rem 0.7rem; display: grid; gap: 0.45rem; background: rgb(255 255 255 / 0.02); }
+  .w .rp-broker.dead { opacity: 0.5; border-style: dashed; }
+  .w .rp-head { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font: 600 0.8rem var(--font-mono); }
+  .w .rp-badge { font: 600 0.65rem var(--font-mono); padding: 0.1rem 0.4rem; border-radius: 99px; border: 1px solid currentColor; }
+  .w .rp-badge.leader { color: var(--fwd); }
+  .w .rp-badge.isr { color: var(--ok); }
+  .w .rp-badge.out { color: var(--grad); }
+  .w .rp-log { display: grid; grid-template-columns: repeat(14, 1fr); gap: 2px; }
+  .w .rp-log i { height: 0.9rem; border-radius: 2px; background: rgb(255 255 255 / 0.05); }
+  .w .rp-log i.has { background: rgb(120 168 255 / 0.35); }
+  .w .rp-log i.committed { background: var(--fwd); }
+  .w .rp-meta { font: 0.72rem var(--font-mono); color: var(--color-dim); }
+  .w .rp-acts { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .w .rp-acts .w-btn { padding: 0.3rem 0.65rem; font-size: 0.75rem; }
+  .w .rp-readout { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .w .rp-ok { color: var(--ok); }
+</style>
+
+<script>
+  import { $, animate, mountAll } from "../widget/widget";
+
+  const PRODUCE = 2.5, FETCH_S = 0.3, SLOW_RATE = 0.4, LAG_MAX_S = 2, CELLS = 14;
+
+  type Broker = { id: number; alive: boolean; slow: boolean; leo: number; caughtUpAt: number; inIsr: boolean; nextFetch: number; el: HTMLElement };
+
+  mountAll("replication", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const log = (s: string) => (out("log").textContent = s);
+    let now = 0, acc = 0, leader: number | null = 0, hw = 0, lastLeader = 0;
+    const brokers: Broker[] = [1, 2, 3].map((id) => ({ id, alive: true, slow: false, leo: 0, caughtUpAt: 0, inIsr: true, nextFetch: 0, el: document.createElement("div") }));
+
+    const isr = () => brokers.filter((b) => b.alive && b.inIsr);
+    const L = () => (leader === null ? null : brokers[leader]);
+
+    const elect = () => {
+      const candidates = brokers.filter((b, i) => i !== leader && b.alive && b.inIsr);
+      const old = L();
+      if (!candidates.length) {
+        lastLeader = leader!; leader = null;
+        log(`broker-${old!.id} was the leader and no other replica is in sync. The partition goes offline rather than lose committed records (unclean.leader.election.enable=false).`);
+        return;
+      }
+      const next = candidates[0];
+      leader = brokers.indexOf(next);
+      next.leo = Math.max(next.leo, hw);
+      log(`broker-${old!.id} died. broker-${next.id} was in the ISR, so it has every committed record and becomes leader. Anything broker-${old!.id} had above the high watermark was never acknowledged; it truncates it when it comes back.`);
+    };
+
+    const toggleAlive = (b: Broker) => {
+      const i = brokers.indexOf(b);
+      if (b.alive) {
+        b.alive = false; b.inIsr = false;
+        if (i === leader) elect();
+        else log(`broker-${b.id} died, so it drops out of the ISR. The leader keeps accepting writes; the high watermark now only waits for the replicas still in sync.`);
+      } else {
+        b.alive = true; b.leo = Math.min(b.leo, hw); b.caughtUpAt = -Infinity; b.inIsr = false;
+        if (leader === null && i === lastLeader) { leader = i; b.inIsr = true; b.caughtUpAt = now; log(`broker-${b.id} is back. It was the last in-sync leader, so the partition comes back online.`); }
+        else if (leader === null) log(`broker-${b.id} is back, but it was out of sync, so it can't lead. The partition stays offline until broker-${brokers[lastLeader].id} returns.`);
+        else log(`broker-${b.id} restarts, truncates to the high watermark (${hw}) and fetches from the leader. It rejoins the ISR once it has caught up.`);
+      }
+      render();
+    };
+
+    const toggleSlow = (b: Broker) => {
+      b.slow = !b.slow;
+      log(b.slow
+        ? `broker-${b.id} is slow (a full disk, a long GC pause). It falls behind, and after 2 s without catching up it leaves the ISR. acks=all stops waiting for it.`
+        : `broker-${b.id} is healthy again. Once it catches up to the leader it rejoins the ISR.`);
+      render();
+    };
+
+    const step = (dt: number) => {
+      now += dt;
+      const lead = L();
+      if (lead && lead.alive) {
+        for (acc += PRODUCE * dt; acc >= 1; acc--) lead.leo++;
+        lead.caughtUpAt = now; lead.inIsr = true;
+      }
+      for (const b of brokers) {
+        if (!b.alive || b === lead || !lead) continue;
+        if (now >= b.nextFetch) {
+          b.nextFetch = now + FETCH_S;
+          b.leo = b.slow ? Math.min(lead.leo, b.leo + SLOW_RATE * FETCH_S * 2.5) : lead.leo;
+        }
+        if (Math.floor(b.leo) >= lead.leo) b.caughtUpAt = now;
+        const wasIn = b.inIsr;
+        b.inIsr = now - b.caughtUpAt <= LAG_MAX_S;
+        if (wasIn !== b.inIsr) { render(); if (!b.inIsr) log(`broker-${b.id} hasn't caught up for 2 s, so the leader removes it from the ISR. The high watermark moves on without it.`); else log(`broker-${b.id} caught up and rejoined the ISR.`); }
+      }
+      const members = isr();
+      if (lead && members.length) hw = Math.max(hw, Math.min(...members.map((b) => Math.floor(b.leo))));
+    };
+
+    const render = () => {
+      out("brokers").replaceChildren(...brokers.map((b, i) => {
+        const role = !b.alive ? "" : i === leader ? `<span class="rp-badge leader">leader</span>` : "";
+        const isrBadge = !b.alive ? `<span class="rp-badge out">down</span>` : b.inIsr ? `<span class="rp-badge isr">in ISR</span>` : `<span class="rp-badge out">out of ISR</span>`;
+        b.el.className = `rp-broker${b.alive ? "" : " dead"}`;
+        b.el.innerHTML = `<div class="rp-head">broker-${b.id} ${role} ${isrBadge}</div><div class="rp-log">${"<i></i>".repeat(CELLS)}</div><div class="rp-meta"></div><div class="rp-acts"><button class="w-btn ghost" data-a="kill">${b.alive ? "Kill" : "Restart"}</button>${b.alive && i !== leader ? `<button class="w-btn ghost" data-a="slow">${b.slow ? "Heal" : "Slow down"}</button>` : ""}</div>`;
+        b.el.querySelector('[data-a="kill"]')!.addEventListener("click", () => toggleAlive(b));
+        b.el.querySelector('[data-a="slow"]')?.addEventListener("click", () => toggleSlow(b));
+        return b.el;
+      }));
+      update();
+    };
+
+    const update = () => {
+      const top = Math.max(CELLS, ...brokers.map((b) => Math.floor(b.leo)));
+      for (const b of brokers) {
+        const leo = Math.floor(b.leo);
+        b.el.querySelectorAll(".rp-log i").forEach((cell, k) => {
+          const off = top - CELLS + k;
+          cell.className = off < leo ? (off < hw ? "has committed" : "has") : "";
+        });
+        const lead = L(), behind = lead && b !== lead && b.alive ? Math.floor(lead.leo) - leo : 0;
+        b.el.querySelector(".rp-meta")!.textContent = `log end offset ${leo}${behind > 0 ? ` · ${behind} behind` : ""}`;
+      }
+      out("leader").textContent = leader === null ? "offline" : String(brokers[leader].id);
+      out("isr").textContent = isr().map((b) => b.id).join(", ") || "—";
+      out("hw").textContent = String(hw);
+    };
+
+    render();
+    animate(root, (dt) => { step(dt); update(); });
+  });
+</script>

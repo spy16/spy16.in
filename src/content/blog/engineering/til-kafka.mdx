@@ -7,9 +7,10 @@ description: |
 tags: ["til", "kafka"]
 ---
 
-I work with Kafka a lot and this post is a summary of some interesting facts about it.
+import ConsumerGroup from "../../../components/engineering/ConsumerGroup.astro";
+import Replication from "../../../components/engineering/Replication.astro";
 
-<!--more-->
+I work with Kafka a lot and this post is a summary of some interesting facts about it.
 
 ## Topic & Partitions
 
@@ -34,8 +35,8 @@ $ kafkacat -b localhost:9092 -L -t til-kafka
   and `til-kafka-2`)
 * Each partition directory contains storage segments[^5] each consisting of 3 files:
   * `x.log` - actual record log. append only file.
-  * `x.index` - Index for fast access. Maintains record offset <> file offset mapping in `x.log`
-  * `x.timeindex` - Index for fast access. Maintains record offset <> timestamp mapping [^2].
+  * `x.index` - Index for fast access. Maintains record offset ↔ file offset mapping in `x.log`
+  * `x.timeindex` - Index for fast access. Maintains record offset ↔ timestamp mapping [^2].
 * A new segment is created when the current active segment reaches the limit set using `log.segment.bytes`
 * New segment name is always the last offset in the old segment + 1 which also means the name reflects the first record
   offset in the segment.
@@ -59,6 +60,10 @@ $ kafka-run-class kafka.tools.DumpLogSegments --deep-iteration --print-data-log 
 * Replicas that are no more than `replica.lag.time.max.ms` behind the leader are called `In-Sync Replicas (ISR)`.
 * If the leader goes down, one of the ISRs is chosen as the new leader [^3].
 
+Try it: slow a follower down until it leaves the ISR, then kill the leader.
+
+<Replication />
+
 ## Consumer
 
 * Consumer is an entity that consumes records from partitions of a topic [^4].
@@ -77,6 +82,10 @@ $ kafka-run-class kafka.tools.DumpLogSegments --deep-iteration --print-data-log 
   broker does not end up assuming the consumer to be dead. If this does happen, a partition re-balance will occur
   causing the consumer to be kicked out of the group. In addition to this, consumer must also send heartbeats within
   every `session.timeout.ms` window. If violated, this also causes a re-balance.
+
+Here is a consumer group on a 6-partition topic. Add consumers past the partition count, remove one until lag builds, or stall one until it gets kicked out:
+
+<ConsumerGroup />
 
 [^1]: https://medium.com/@durgaswaroop/a-practical-introduction-to-kafka-storage-internals-d5b544f6925f
 [^2]: https://jaceklaskowski.gitbooks.io/apache-kafka/content/kafka-log-TimeIndex.html
