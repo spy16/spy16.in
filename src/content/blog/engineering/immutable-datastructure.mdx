@@ -9,6 +9,7 @@ publish: true
 import { Image } from "astro:assets";
 import afterImbl from "./after-imbl.png";
 import beforeImbl from "./before-imbl.png";
+import StructuralSharing from "../../../components/engineering/StructuralSharing.astro";
 
 ## What Are Immutable Data Structures?
 
@@ -92,6 +93,10 @@ See the before and after latency profiles.
 <Image src={afterImbl} alt="After" class="h-[400px] w-full" />
 
 This performance gain came from the structural sharing properties of the immutable data structures. When a client subscribed to a topic, only the specific topic's subscriber list needed to be modified. All other topics in the map remained completely unchanged and were shared between the old and new versions. The "clone" operation became just copying a few pointers rather than deep-copying potentially thousands of subscriber lists.
+
+Try both. Subscribe a client to a topic and watch what each strategy has to copy before the distribution task can see the change:
+
+<StructuralSharing />
 
 ## Key Takeaways
 

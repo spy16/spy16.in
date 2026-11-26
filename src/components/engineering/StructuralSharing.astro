@@ -1,0 +1,157 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="structural-sharing">
+  <span class="w-label">One subscribe, two ways to hand the map over</span>
+  <div class="w-btns" role="group" aria-label="Copy strategy">
+    <button class="w-btn" data-mode="deep" aria-pressed="true">HashMap + deep clone</button>
+    <button class="w-btn" data-mode="imbl" aria-pressed="false">imbl (structural sharing)</button>
+  </div>
+  <div class="w-fig"><svg role="img" aria-label="A trie of 64 topics. Tap a topic to subscribe a client to it; copied nodes turn amber."></svg></div>
+  <div class="w-controls">
+    <div class="w-btns"><button class="w-btn ghost" data-act="random">Subscribe to a random topic</button></div>
+    <span class="w-log">or tap a topic (bottom row)</span>
+  </div>
+  <div class="w-readout ss-readout">
+    <div class="w-cell"><span>nodes copied</span><b class="w-grad" data-out="copied">0</b></div>
+    <div class="w-cell"><span>nodes shared</span><b class="w-fwd" data-out="shared">0</b></div>
+    <div class="w-cell"><span>handover</span><b data-out="handover">–</b></div>
+  </div>
+  <p class="w-explain" data-out="explain">Tap a topic to subscribe a client to it.</p>
+
+  <span class="w-label">Now grow the map</span>
+  <div class="w-controls">
+    <label class="w-ctl">topics in the map = <b data-out="n"></b><input data-in="n" type="range" min="4" max="20" step="1" value="10" /></label>
+  </div>
+  <div class="ss-bars">
+    <span>deep clone copies</span><div class="ss-bar"><i class="deep" data-bar="deep"></i></div><b data-out="deep"></b>
+    <span>imbl copies</span><div class="ss-bar"><i class="imbl" data-bar="imbl"></i></div><b data-out="imbl"></b>
+  </div>
+  <p class="w-log">Bars are on a log scale. The tree above branches 4 ways so it fits; imbl's HAMT branches 32 ways, so a path is about log₃₂ n nodes long.</p>
+</div>
+
+<style is:global>
+  [data-widget="structural-sharing"] .w-fig svg { max-width: 36rem; margin-inline: auto; cursor: pointer; touch-action: manipulation; }
+  .w .ss-readout { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .w .ss-edge { stroke: var(--rule); stroke-width: 1.5; }
+  .w .ss-edge.copied { stroke: var(--grad); }
+  .w .ss-node { fill: var(--fwd); transition: fill 0.15s; }
+  .w .ss-node.copied { fill: var(--grad); }
+  .w .ss-node.leaf { fill: rgb(120 168 255 / 0.45); }
+  .w .ss-node.leaf.copied { fill: var(--grad); }
+  .w .ss-ring { fill: none; stroke: var(--grad); stroke-width: 2; }
+  .w .ss-lbl { fill: var(--color-dim); font: 13px var(--font-mono); }
+  .w .ss-bars { display: grid; grid-template-columns: auto 1fr auto; gap: 0.5rem 0.75rem; align-items: center; font-size: 0.8rem; color: var(--color-dim); }
+  .w .ss-bars b { font: 600 0.85rem var(--font-mono); color: var(--color-fg); text-align: right; min-width: 7ch; }
+  .w .ss-bar { height: 0.6rem; border-radius: 99px; background: rgb(255 255 255 / 0.06); overflow: hidden; }
+  .w .ss-bar i { display: block; height: 100%; border-radius: inherit; transition: width 0.25s; }
+  .w .ss-bar i.deep { background: var(--grad); }
+  .w .ss-bar i.imbl { background: var(--fwd); }
+</style>
+
+<script>
+  import { $, mountAll, reduceMotion } from "../widget/widget";
+
+  const BRANCH = 4, DEPTH = 3, LEAVES = BRANCH ** DEPTH;
+  const W = 480, H = 214, PAD = 14, LEVEL_Y = [30, 82, 134, 186];
+  const RADIUS = [9, 7, 5, 3.5];
+  const STEP_MS = 16;
+  const NS = "http://www.w3.org/2000/svg";
+
+  type Node = { id: number; level: number; x: number; y: number; parent: number | null; el?: SVGCircleElement; edge?: SVGLineElement };
+
+  mountAll("structural-sharing", (root) => {
+    const svg = $<SVGSVGElement>(root, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const el = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>, text?: string) => {
+      const e = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      if (text !== undefined) e.textContent = text;
+      return e;
+    };
+    const out = (k: string, v: string) => ($(root, `[data-out="${k}"]`).textContent = v);
+
+    const nodes: Node[] = [];
+    const leafX = (i: number) => PAD + (i * (W - 2 * PAD)) / (LEAVES - 1);
+    const build = (level: number, parent: number | null, first: number): Node => {
+      const span = BRANCH ** (DEPTH - level);
+      const n: Node = { id: nodes.length, level, parent, y: LEVEL_Y[level], x: (leafX(first) + leafX(first + span - 1)) / 2 };
+      nodes.push(n);
+      if (level < DEPTH) for (let c = 0; c < BRANCH; c++) build(level + 1, n.id, first + c * (span / BRANCH));
+      return n;
+    };
+    build(0, null, 0);
+    const leaves = nodes.filter((n) => n.level === DEPTH);
+
+    const gEdges = el("g", {}), gNodes = el("g", {}), ring = el("circle", { class: "ss-ring", r: 8, opacity: 0 });
+    svg.append(gEdges, gNodes, ring,
+      el("text", { x: PAD, y: LEVEL_Y[0] + 4, class: "ss-lbl" }, "map root"),
+      el("text", { x: W - PAD, y: LEVEL_Y[0] + 4, class: "ss-lbl", "text-anchor": "end" }, `${LEAVES} topics ↓`));
+    for (const n of nodes) {
+      if (n.parent !== null) {
+        const p = nodes[n.parent];
+        n.edge = el("line", { x1: p.x, y1: p.y, x2: n.x, y2: n.y, class: "ss-edge" });
+        gEdges.append(n.edge);
+      }
+      n.el = el("circle", { cx: n.x, cy: n.y, r: RADIUS[n.level], class: `ss-node${n.level === DEPTH ? " leaf" : ""}` });
+      gNodes.append(n.el);
+    }
+
+    let mode: "deep" | "imbl" = "deep", busy = false, timer = 0;
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) =>
+      b.addEventListener("click", () => {
+        mode = b.dataset.mode as typeof mode;
+        root.querySelectorAll("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+        clear(); out("copied", "0"); out("shared", "0"); out("handover", "–");
+        out("explain", mode === "deep"
+          ? "Tap a topic. The subscription task updates its map, then clones all of it to send to the distribution task."
+          : "Tap a topic. imbl copies only the nodes on the path to that topic; the new root points at every untouched subtree of the old one.");
+      }));
+
+    const clear = () => { clearTimeout(timer); busy = false; nodes.forEach((n) => { n.el!.classList.remove("copied"); n.edge?.classList.remove("copied"); }); ring.setAttribute("opacity", "0"); };
+
+    const subscribe = (leaf: Node) => {
+      if (busy) return;
+      clear();
+      ring.setAttribute("cx", String(leaf.x)); ring.setAttribute("cy", String(leaf.y)); ring.setAttribute("opacity", "1");
+      const path: Node[] = [];
+      for (let n: Node | null = leaf; n; n = n.parent === null ? null : nodes[n.parent]) path.unshift(n);
+      const copy = mode === "deep" ? [...nodes].sort((a, b) => a.level - b.level || a.x - b.x) : path;
+      const topic = leaves.indexOf(leaf);
+      out("handover", mode === "deep" ? "whole map" : "one pointer");
+      out("explain", mode === "deep"
+        ? `Topic ${topic} gained a subscriber. To hand the map to the distribution task, every one of the ${nodes.length} nodes is copied, even though only one topic changed.`
+        : `Topic ${topic} gained a subscriber. imbl copies the ${path.length} nodes on its path and shares the other ${nodes.length - path.length} with the previous version. Sending it is one cheap reference clone.`);
+      let k = 0;
+      const mark = (n: Node) => { n.el!.classList.add("copied"); n.edge?.classList.add("copied"); };
+      const tick = () => {
+        mark(copy[k++]);
+        out("copied", String(k)); out("shared", String(mode === "deep" ? 0 : nodes.length - k));
+        if (k < copy.length) timer = window.setTimeout(tick, STEP_MS * (mode === "deep" ? 1 : 6));
+        else busy = false;
+      };
+      busy = true;
+      if (reduceMotion()) { copy.forEach(mark); k = copy.length; out("copied", String(k)); out("shared", String(mode === "deep" ? 0 : nodes.length - k)); busy = false; }
+      else tick();
+    };
+
+    svg.addEventListener("click", (e) => {
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const p = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+      const i = Math.max(0, Math.min(LEAVES - 1, Math.round(((p.x - PAD) / (W - 2 * PAD)) * (LEAVES - 1))));
+      subscribe(leaves[i]);
+    });
+    $(root, '[data-act="random"]').addEventListener("click", () => subscribe(leaves[Math.floor(Math.random() * LEAVES)]));
+
+    const nIn = $<HTMLInputElement>(root, '[data-in="n"]');
+    const scale = () => {
+      const n = 2 ** +nIn.value, k = Math.ceil(Math.log(n) / Math.log(32)) + 1, max = Math.log10(2 ** 20);
+      out("n", n.toLocaleString()); out("deep", `${n.toLocaleString()} entries`); out("imbl", `${k} nodes`);
+      $(root, '[data-bar="deep"]').style.width = `${(Math.log10(n) / max) * 100}%`;
+      $(root, '[data-bar="imbl"]').style.width = `${Math.max(2, (Math.log10(k) / max) * 100)}%`;
+    };
+    nIn.addEventListener("input", scale);
+    scale();
+  });
+</script>
