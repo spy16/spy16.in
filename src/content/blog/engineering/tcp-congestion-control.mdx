@@ -1,0 +1,155 @@
+---
+title: "CUBIC vs BBR: how TCP decides how fast to send"
+pubDate: 2026-11-28
+publish: true
+description: |
+  Nothing tells a TCP sender how fast the path is. CUBIC guesses from packet loss, BBR builds a model of the pipe. This post walks through both.
+tags: [deep-tech, networking, tcp, linux]
+---
+
+import Pipe from "../../../components/engineering/Pipe.astro";
+import CubicCurve from "../../../components/engineering/CubicCurve.astro";
+import LinkSim from "../../../components/engineering/LinkSim.astro";
+
+When you send a file over TCP, nothing tells the sender how fast the path is. The bottleneck could be a 10 Gbps datacenter link or a busy coffee-shop Wi-Fi, and it can change in the middle of the transfer. So the sender has to guess, and keep guessing. That guessing is called **congestion control**.
+
+On Linux it's pluggable. `sysctl net.ipv4.tcp_congestion_control` picks the algorithm for new connections, and `reno` is always available [^1]. The two you will most likely run into are CUBIC, which is the default in the Linux, Windows and Apple stacks [^2], and BBR from Google. They look at completely different signals, so it's worth seeing how each one works.
+
+## Problem
+
+Think of the path as a pipe with one narrow point, the **bottleneck link**. Two numbers describe it:
+
+1. The bottleneck bandwidth, e.g., 100 Mbps.
+2. The round-trip propagation time, i.e., the RTT when no queue is in the way, e.g., 40 ms.
+
+Multiply them and you get the **bandwidth-delay product (BDP)**: how much data has to be "in flight" (sent, not yet acknowledged) to keep the bottleneck busy. For 100 Mbps and 40 ms, that's 12.5 MB/s × 0.04 s = 500 KB, or about 333 packets of 1500 bytes.
+
+So what happens if the sender keeps more or less than that in flight?
+
+1. Less than one BDP: the link is idle part of the time. You get less than 100 Mbps.
+2. Exactly one BDP: full rate, and the RTT is just the propagation delay.
+3. More than one BDP: the rate can't go any higher. The extra packets wait in the bottleneck's buffer, and the RTT goes up.
+4. More than BDP + buffer: the buffer is full and the router starts dropping packets.
+
+Try it. Drag the data in flight past the BDP and watch the RTT climb while the rate stays flat:
+
+<Pipe />
+
+The ideal place to be is the corner at one BDP: full rate, lowest delay. The BBR draft calls this matching both the data rate and the data volume of the path [^3]. The trouble is that the sender doesn't know where that corner is. It only sees ACKs coming back.
+
+## Using loss as the signal
+
+The classic answer, from Reno, is: keep increasing until something breaks, then back off. The sender keeps a **congestion window** (`cwnd`), the most data it allows in flight. In congestion avoidance, it adds about one packet to `cwnd` per round trip (`cwnd += SMSS*SMSS/cwnd` on every ACK). When it detects a loss, it cuts the window to half of what was in flight [^4]. This is AIMD: additive increase, multiplicative decrease.
+
+If you look at the pipe widget again, this means Reno doesn't stop at the corner. It only learns it went too far at the very right edge, when packets get dropped. Then it halves and starts climbing again. That's the familiar sawtooth.
+
+On a small pipe that's fine. On a big pipe, one packet per RTT is painfully slow. Take a window of 1,000 packets at 40 ms RTT. After a loss it drops to 500, and climbing back takes 500 round trips, i.e., 20 seconds. And the bigger the BDP, the worse it gets. The CUBIC RFC was written mostly because of this: Reno has "low utilization over fast and long-distance networks" [^2].
+
+## CUBIC
+
+CUBIC keeps the same idea of "grow until loss, then back off", but changes the shape of the growth. Instead of adding a fixed amount per RTT, the window is a function of **time since the last loss** [^2]:
+
+```
+W_cubic(t) = C * (t - K)^3 + W_max
+```
+
+To give you a summary:
+
+1. `W_max` is the window just before the last loss. That's the last place the network said "too much".
+2. On a loss, CUBIC remembers `W_max` and cuts the window to `0.7 × W_max` (β = 0.7, where Reno uses 0.5) [^2].
+3. `K` is how long the curve takes to get back to `W_max`: `K = cbrt((W_max - cwnd_epoch) / C)`, with `C = 0.4` [^2].
+4. Before `K`, the curve is concave: it climbs fast, then slows down as it gets near `W_max`. After `K`, it's convex: it starts slowly and speeds up again, probing for more bandwidth in case something changed.
+
+So CUBIC spends most of its time near `W_max`, which is where it last saw the network was full. The RFC says that under steady state, "most window size samples of CUBIC are close to that remembered congestion window size" [^2].
+
+Here is the curve. Compare it with Reno, then change the RTT:
+
+<CubicCurve />
+
+Two things to notice. First, `K` grows with the cube root of `W_max`, while Reno's recovery time grows linearly with it. Second, `t` is wall-clock time, not round trips, so CUBIC's growth doesn't depend on the RTT. Two CUBIC flows with different RTTs end up with similar windows, while Reno heavily favours the short-RTT flow [^2].
+
+There is one more detail. On small pipes with short RTTs, the cubic curve can grow slower than Reno would. So CUBIC also tracks what Reno would have done (`W_est`) and uses whichever is bigger. The RFC calls this the "Reno-friendly region" [^2].
+
+## Where loss-based control breaks
+
+CUBIC is a better sawtooth, but it's still a sawtooth. It still finds the limit by filling the buffer until packets drop. The BBR draft lists the problems with this [^3]:
+
+1. **Deep buffers**: at the edge of the Internet, routers often have large buffers. A loss-based sender keeps them full, so every packet waits in a queue. This is called **bufferbloat**.
+2. **Shallow buffers**: a short burst can cause a drop even when the link is mostly idle. Reno cuts its rate by 50% and CUBIC by 30%, and then they climb back slowly.
+3. **Random loss**: if some loss has nothing to do with congestion (a flaky link, e.g.), loss-based control can't tell the difference. For CUBIC, sustaining 10 Gbps over a 100 ms RTT needs a loss rate below 0.000003%, and at 1% loss it can do at most 3 Mbps on that path [^3].
+
+Run each algorithm below. Start with CUBIC and a 4 BDP buffer and look at the RTT. Then try 1% random loss. Then switch to BBR and do both again:
+
+<LinkSim />
+
+**Note**: this is a simple model with one flow and one step per round trip, not a packet-level simulation. It's here to show the shape of each algorithm, not exact numbers.
+
+## BBR
+
+BBR (Bottleneck Bandwidth and Round-trip propagation time) takes a different approach. Instead of waiting for loss, it builds an explicit **model of the pipe** from what ACKs tell it, and sends according to that model [^3].
+
+The Linux source sums up the original version in five lines [^5]:
+
+```
+bottleneck_bandwidth = windowed_max(delivered / elapsed, 10 round trips)
+min_rtt = windowed_min(rtt, 10 seconds)
+pacing_rate = pacing_gain * bottleneck_bandwidth
+cwnd = max(cwnd_gain * bottleneck_bandwidth * min_rtt, 4)
+```
+
+To give you a summary:
+
+1. On every ACK, BBR measures the delivery rate: how much data got delivered over how much time. The **max** over the last ~10 round trips is its estimate of the bottleneck bandwidth.
+2. The **min** RTT over the last 10 seconds is its estimate of the propagation delay. A queue can only make an RTT longer, never shorter, so the minimum is the closest thing to "no queue".
+3. It **paces** packets at `pacing_gain × bandwidth`. It doesn't send bursts whenever the window allows, it spaces them out in time.
+4. The window is only a safety cap, at 2× the estimated BDP (`cwnd_gain = 2`).
+
+Notice that loss isn't in there. The kernel comment says it directly: "The core algorithm does not react directly to packet losses or delays" [^5].
+
+### You can't measure both at once
+
+There's a catch with this model. Think about what each measurement needs:
+
+1. To see the **full bandwidth**, you have to send at least a BDP, so the bottleneck is busy. Any extra sits in the queue.
+2. To see the **propagation delay**, the queue has to be empty, so the bottleneck isn't busy.
+
+So whenever you can see one, you can't see the other. BBR solves this by changing its gain over time, in a small state machine [^5]:
+
+1. **Startup**: pace at 2/ln2 ≈ 2.885 times the current estimate, which doubles the sending rate every round trip, like slow start. When the bandwidth estimate stops growing by at least 25% for 3 rounds, it assumes the pipe is full.
+2. **Drain**: pace at 1/2.885 to empty the queue Startup just built.
+3. **ProbeBW**: the steady state. It cycles through pacing gains of 1.25, 0.75 and then 1.0 for six rounds. The 1.25 round checks if there's more bandwidth. The 0.75 round drains whatever queue that probe created. The rest just use the pipe.
+4. **ProbeRTT**: if it hasn't seen a new minimum RTT for 10 seconds, it drops to 4 packets in flight for at least 200 ms, so the queue empties and it can measure the RTT again.
+
+In the simulator, this is the BBR line that pulses slightly above the BDP and then returns, instead of a sawtooth. With a 4 BDP buffer, CUBIC fills the buffer and the RTT ends up several times higher. BBR keeps it close to 40 ms. With 1% random loss, CUBIC collapses and BBR barely notices. Nice!
+
+## What BBR got wrong
+
+Ignoring loss is also BBR's weak spot. Try BBR with the 0.1 BDP buffer. Each 1.25 probe pushes about a quarter of a BDP into a buffer that can't hold it, and since the original BBR doesn't back off on loss, it just keeps dropping packets every cycle.
+
+The same thing makes coexistence hard. A CUBIC flow sharing a bottleneck with BBR sees those drops and backs off, while BBR keeps going. The current IETF draft, which describes BBRv3, changes this [^3]:
+
+1. It tolerates at most 2% packet loss per round trip while probing for bandwidth (`BBR.LossThresh`).
+2. On a round trip with loss, it cuts by 0.7 (`BBR.Beta`), the same factor as CUBIC.
+3. It probes for bandwidth less often, with a timescale chosen so that Reno/CUBIC flows sharing the link can still fill a typical ~60-packet BDP.
+
+The draft is still experimental. For example, BBR "does not deal well with persistently application limited traffic", since it can't measure the full bandwidth if it never fills the pipe [^3].
+
+## Trying it on Linux
+
+You can switch algorithms on the fly and look at the state of each socket:
+
+```sh
+sysctl net.ipv4.tcp_available_congestion_control
+sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
+ss -ti   # per-socket cwnd, rtt, and for BBR its bw and min_rtt estimates
+```
+
+The kernel source also recommends running BBR with the `fq` qdisc, because otherwise TCP falls back to its own pacing with "one high resolution timer per TCP socket" [^5].
+
+So both algorithms are guessing where the corner of the pipe is. CUBIC finds it by hitting the wall and remembering where the wall was. BBR finds it by measuring the pipe, but it has to keep shaking the pipe a little to make sure the measurements are still true.
+
+[^1]: tcp(7), [Linux manual page](https://man7.org/linux/man-pages/man7/tcp.7.html): `tcp_congestion_control`.
+[^2]: Xu, Ha, Rhee, Goel, Eggert, [RFC 9438: CUBIC for Fast and Long-Distance Networks](https://www.rfc-editor.org/rfc/rfc9438), 2023. Deployment in section 1; design principles in section 3; window function, K and C in sections 4.2 and 5.1; β = 0.7 in section 4.6; Reno-friendly region in section 4.3.
+[^3]: Cardwell et al., [draft-ietf-ccwg-bbr-07: BBR Congestion Control](https://datatracker.ietf.org/doc/draft-ietf-ccwg-bbr/), November 2026. Problems with loss-based control in section 1; data rate and volume in section 3.1; LossThresh and Beta in section 2.8; coexistence with Reno/CUBIC in section 5.3.3.8; experimental status in section 3.8.
+[^4]: Allman, Paxson, Blanton, [RFC 5681: TCP Congestion Control](https://www.rfc-editor.org/rfc/rfc5681), 2009. Section 3.1, equations 3 and 4.
+[^5]: Linux kernel, [net/ipv4/tcp_bbr.c](https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_bbr.c): the header comment, `bbr_high_gain`, `bbr_pacing_gain[]`, `bbr_full_bw_thresh`, `bbr_min_rtt_win_sec` and `bbr_probe_rtt_mode_ms`. The original design is in Cardwell, Cheng, Gunn, Hassas Yeganeh, Jacobson, "BBR: Congestion-Based Congestion Control", ACM Queue 14(5), 2016.

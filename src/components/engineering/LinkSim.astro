@@ -1,0 +1,207 @@
+---
+import "../widget/widget.css";
+
+const BUFS = [
+  ["0.1", "0.1 BDP"],
+  ["1", "1 BDP"],
+  ["4", "4 BDP"],
+];
+const LOSS = [
+  ["0", "0%"],
+  ["0.0001", "0.01%"],
+  ["0.01", "1%"],
+];
+---
+
+<div class="w not-prose" data-widget="link-sim">
+  <span class="w-label">one flow · 100 Mbps · 40 ms · 60 seconds of simulated time</span>
+  <canvas class="w-canvas" width="600" height="320" aria-label="Data in flight and RTT over time"></canvas>
+  <div class="w-controls">
+    <div class="w-ctl">algorithm
+      <div class="w-btns">
+        {["reno", "cubic", "bbr"].map((a, i) => <button class="w-btn" data-algo={a} aria-pressed={i === 1 ? "true" : "false"}>{a === "bbr" ? "BBR" : a === "cubic" ? "CUBIC" : "Reno"}</button>)}
+      </div>
+    </div>
+    <div class="w-ctl">bottleneck buffer
+      <div class="w-btns">
+        {BUFS.map(([v, l]) => <button class="w-btn" data-buf={v} aria-pressed={v === "1" ? "true" : "false"}>{l}</button>)}
+      </div>
+    </div>
+    <div class="w-ctl">random loss
+      <div class="w-btns">
+        {LOSS.map(([v, l]) => <button class="w-btn" data-loss={v} aria-pressed={v === "0" ? "true" : "false"}>{l}</button>)}
+      </div>
+    </div>
+  </div>
+  <div class="w-btns">
+    <button class="w-btn ghost" data-act="play">Pause</button>
+    <button class="w-btn ghost" data-act="restart">Restart</button>
+  </div>
+  <div class="w-readout">
+    <div class="w-cell"><span>link used</span><b class="w-fwd" data-out="util">-</b></div>
+    <div class="w-cell"><span>average RTT</span><b class="w-grad" data-out="rtt">-</b></div>
+    <div class="w-cell"><span>packets dropped</span><b data-out="loss">-</b></div>
+    <div class="w-cell"><span>state</span><b data-out="state">-</b></div>
+  </div>
+</div>
+
+<script>
+  import { $, mountAll, animate, fitCanvas } from "../widget/widget";
+
+  const B = 100e6 / 8 / 1500; // packets per second
+  const R0 = 0.04;
+  const BDP = B * R0;
+  const T_END = 60;
+  const SPEED = 4;
+  const W = 600, H = 320, PAD = 36;
+  const CUBIC_C = 0.4, CUBIC_BETA = 0.7, CUBIC_ALPHA = (3 * (1 - CUBIC_BETA)) / (1 + CUBIC_BETA);
+  const BBR_HIGH = 2.885, BBR_CYCLE = [1.25, 0.75, 1, 1, 1, 1, 1, 1];
+
+  type Pt = { t: number; inflight: number; rtt: number };
+
+  mountAll("link-sim", (root) => {
+    const cv = $<HTMLCanvasElement>(root, "canvas");
+    const ctx = fitCanvas(cv, W, H);
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const css = (v: string) => getComputedStyle(root).getPropertyValue(v).trim() || "#888";
+    let algo = "cubic", buf = 1, loss = 0;
+    let s: ReturnType<typeof fresh>;
+
+    function fresh() {
+      return {
+        t: 0, q: 0, w: 10, ss: true, trace: [] as Pt[], delivered: 0, sent: 0, dropped: 0, rttSum: 0,
+        wmax: 0, epoch: 0, k: 0, west: 0,
+        bw: 10 / R0, samples: [] as number[], minRtt: R0, minStamp: 0, phase: "startup", fullBw: 0, fullCnt: 0, cycle: 0, probeUntil: 0,
+      };
+    }
+
+    const qmax = () => buf * BDP;
+
+    const onLoss = () => {
+      if (algo === "reno") s.w = Math.max(s.w * 0.5, 2);
+      else { s.wmax = s.w; s.w = Math.max(s.w * CUBIC_BETA, 2); s.epoch = s.t; s.west = s.w; s.k = Math.cbrt((s.wmax * (1 - CUBIC_BETA)) / CUBIC_C); }
+      s.ss = false;
+    };
+
+    // One round trip of a window-based (loss-driven) sender.
+    const stepWindow = () => {
+      let q = Math.max(0, s.w - BDP), drop = 0;
+      if (q > qmax()) { drop = q - qmax(); q = qmax(); }
+      const rtt = R0 + q / B;
+      const sent = s.w;
+      const rand = sent * loss;
+      drop += rand;
+      const lost = drop >= 1 || Math.random() < rand;
+      s.q = q;
+      s.sent += sent; s.dropped += drop; s.delivered += sent - drop;
+      s.rttSum += rtt * rtt;
+      s.trace.push({ t: s.t, inflight: s.w, rtt });
+      s.t += rtt;
+      if (lost) return onLoss();
+      if (s.ss) { s.w *= 2; return; }
+      if (algo === "reno") { s.w += 1; return; }
+      const tt = s.t - s.epoch + rtt;
+      const target = Math.min(Math.max(CUBIC_C * (tt - s.k) ** 3 + s.wmax, s.w), 1.5 * s.w);
+      s.west += s.west >= s.wmax ? 1 : CUBIC_ALPHA;
+      s.w = Math.max(target, s.west);
+    };
+
+    // One round trip of BBR (v1 as in Linux tcp_bbr.c): pace at gain * max_bw, cap inflight at cwnd_gain * BDP estimate.
+    const stepBBR = () => {
+      const rtt = R0 + s.q / B;
+      let pGain = 1, cGain = 2;
+      if (s.phase === "startup") { pGain = BBR_HIGH; cGain = BBR_HIGH; }
+      else if (s.phase === "drain") { pGain = 1 / BBR_HIGH; cGain = BBR_HIGH; }
+      else if (s.phase === "probe_bw") pGain = BBR_CYCLE[s.cycle];
+      let cwnd = Math.max(cGain * s.bw * s.minRtt, 4);
+      if (s.phase === "probe_rtt") cwnd = 4;
+      const rate = Math.min(pGain * s.bw, cwnd / rtt);
+      let q = s.q + (rate - B) * rtt, drop = 0;
+      if (q < 0) q = 0;
+      if (q > qmax()) { drop = q - qmax(); q = qmax(); }
+      const sent = rate * rtt;
+      drop += sent * loss;
+      s.q = q;
+      s.sent += sent; s.dropped += drop; s.delivered += Math.min(rate, B) * rtt - sent * loss;
+      s.rttSum += rtt * rtt;
+      s.trace.push({ t: s.t, inflight: sent, rtt });
+      s.t += rtt;
+
+      s.samples.push(Math.min(rate, B));
+      if (s.samples.length > 10) s.samples.shift();
+      s.bw = Math.max(...s.samples);
+      const sample = R0 + s.q / B;
+      if (sample <= s.minRtt || s.t - s.minStamp > 10) {
+        if (s.t - s.minStamp > 10 && s.phase === "probe_bw") { s.phase = "probe_rtt"; s.probeUntil = s.t + 0.2; }
+        s.minRtt = sample; s.minStamp = s.t;
+      }
+
+      if (s.phase === "startup") {
+        if (s.bw >= s.fullBw * 1.25) { s.fullBw = s.bw; s.fullCnt = 0; } else if (++s.fullCnt >= 3) s.phase = "drain";
+      } else if (s.phase === "drain") {
+        if (s.q < 1) { s.phase = "probe_bw"; s.cycle = 2 + Math.floor(Math.random() * 6); }
+      } else if (s.phase === "probe_rtt") {
+        if (s.t >= s.probeUntil) s.phase = "probe_bw";
+      } else s.cycle = (s.cycle + 1) % BBR_CYCLE.length;
+    };
+
+    const draw = () => {
+      ctx.clearRect(0, 0, W, H);
+      const top = { y0: 150, y1: 14, max: (BDP + qmax()) * 1.25 };
+      const bot = { y0: H - 20, y1: 186, max: (R0 + qmax() / B) * 1000 * 1.2 };
+      const sx = (t: number) => PAD + (t / T_END) * (W - PAD - 8);
+      const fy = (p: { y0: number; y1: number; max: number }, v: number) => p.y0 + (Math.min(v, p.max) / p.max) * (p.y1 - p.y0);
+      ctx.font = "11px ui-monospace, monospace";
+      ctx.lineWidth = 1;
+      const hline = (p: typeof top, v: number, label: string) => {
+        ctx.strokeStyle = css("--color-dim"); ctx.setLineDash([3, 4]); ctx.globalAlpha = 0.6;
+        ctx.beginPath(); ctx.moveTo(PAD, fy(p, v)); ctx.lineTo(W - 8, fy(p, v)); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+        ctx.fillStyle = css("--color-dim"); ctx.fillText(label, PAD + 4, fy(p, v) - 4);
+      };
+      hline(top, BDP, "BDP");
+      hline(top, BDP + qmax(), "BDP + buffer");
+      hline(bot, R0 * 1000, "40 ms");
+      ctx.fillStyle = css("--color-dim");
+      ctx.fillText("in flight", 2, 24);
+      ctx.fillText("RTT", 2, 196);
+      ctx.fillText("0 s", PAD, H - 4);
+      ctx.fillText("60 s", W - 34, H - 4);
+      const line = (color: string, f: (p: Pt) => number) => {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.beginPath();
+        s.trace.forEach((p, i) => (i ? ctx.lineTo(sx(p.t), f(p)) : ctx.moveTo(sx(p.t), f(p))));
+        ctx.stroke();
+      };
+      line(css("--fwd"), (p) => fy(top, p.inflight));
+      line(css("--grad"), (p) => fy(bot, p.rtt * 1000));
+      const t = Math.max(s.t, 1e-9);
+      out("util").textContent = `${Math.min(100, (100 * s.delivered) / (B * t)).toFixed(0)}%`;
+      out("rtt").textContent = `${((s.rttSum / t) * 1000).toFixed(0)} ms`;
+      out("loss").textContent = `${Math.round(s.dropped).toLocaleString()} (${((100 * s.dropped) / Math.max(s.sent, 1)).toFixed(2)}%)`;
+      out("state").textContent = s.t >= T_END ? "done" : algo === "bbr" ? s.phase : s.ss ? "slow start" : "avoidance";
+    };
+
+    const restart = () => { s = fresh(); draw(); setPlaying(true); };
+
+    const setPlaying = animate(root, (dt) => {
+      const target = Math.min(s.t + dt * SPEED, T_END);
+      while (s.t < target) (algo === "bbr" ? stepBBR : stepWindow)();
+      draw();
+      if (s.t >= T_END) setPlaying(false);
+    }, $<HTMLButtonElement>(root, `[data-act="play"]`));
+
+    const pick = (attr: string, set: (v: string) => void) => {
+      root.querySelectorAll<HTMLButtonElement>(`[data-${attr}]`).forEach((b) => b.addEventListener("click", () => {
+        root.querySelectorAll(`[data-${attr}]`).forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+        set(b.getAttribute(`data-${attr}`)!);
+        restart();
+      }));
+    };
+    pick("algo", (v) => (algo = v));
+    pick("buf", (v) => (buf = +v));
+    pick("loss", (v) => (loss = +v));
+    $(root, `[data-act="restart"]`).addEventListener("click", restart);
+    s = fresh();
+    draw();
+  });
+</script>

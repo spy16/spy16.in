@@ -1,0 +1,82 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="cubic-curve">
+  <span class="w-label">window after one loss at t = 0 · CUBIC vs Reno</span>
+  <div class="w-fig">
+    <svg viewBox="0 0 600 260" role="img" aria-label="CUBIC and Reno window growth after a loss">
+      <line class="gridline" x1="40" x2="580" data-out="wmaxLine" />
+      <text class="svglabel" x="44" data-out="wmaxText">W_max (window at the last loss)</text>
+      <line class="gridline" data-out="kLine" y1="20" y2="230" />
+      <text class="svglabel" data-out="kText" y="250" text-anchor="middle">K</text>
+      <path class="curve cc-reno" data-out="reno" />
+      <path class="curve cc-cubic" data-out="cubic" />
+      <text class="svglabel" x="40" y="250">0</text>
+      <text class="svglabel" x="580" y="250" text-anchor="end">30 s</text>
+    </svg>
+  </div>
+  <div class="w-controls">
+    <label class="w-ctl">W_max <b data-out="wV"></b><input type="range" data-in="w" min="20" max="3000" value="800" /></label>
+    <label class="w-ctl">RTT <b data-out="rV"></b><input type="range" data-in="r" min="5" max="200" value="40" /></label>
+  </div>
+  <div class="w-readout">
+    <div class="w-cell"><span>CUBIC back to W_max (K)</span><b class="w-fwd" data-out="kV"></b></div>
+    <div class="w-cell"><span>Reno back to W_max</span><b class="w-grad" data-out="renoV"></b></div>
+  </div>
+  <p class="w-explain" data-out="msg"></p>
+</div>
+
+<style is:global>
+  .w .curve.cc-cubic { stroke: var(--fwd); stroke-width: 2.5; }
+  .w .curve.cc-reno { stroke: var(--grad); }
+</style>
+
+<script>
+  import { $, mountAll } from "../widget/widget";
+
+  const C = 0.4, BETA = 0.7, ALPHA = (3 * (1 - BETA)) / (1 + BETA);
+  const T = 30, X0 = 40, X1 = 580, Y0 = 230, Y1 = 20, YMAX = 1.6;
+
+  mountAll("cubic-curve", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const inp = (k: string) => $<HTMLInputElement>(root, `[data-in="${k}"]`);
+    const sx = (t: number) => X0 + (t / T) * (X1 - X0);
+    const sy = (w: number) => Y0 + (Math.min(w, YMAX) / YMAX) * (Y1 - Y0);
+    const secs = (s: number) => (s < 60 ? `${s.toFixed(1)} s` : `${(s / 60).toFixed(1)} min`);
+
+    const render = () => {
+      const wmax = +inp("w").value, rtt = +inp("r").value / 1000;
+      const k = Math.cbrt((wmax * (1 - BETA)) / C);
+      let cubic = "", reno = "", friendly = false;
+      for (let i = 0; i <= 300; i++) {
+        const t = (i / 300) * T;
+        const wc = C * (t - k) ** 3 + wmax;
+        const west = BETA * wmax + (ALPHA * t) / rtt;
+        if (west > wc && t < k) friendly = true;
+        const w = Math.max(wc, west) / wmax;
+        const wr = (0.5 * wmax + t / rtt) / wmax;
+        if (w <= YMAX) cubic += `${i ? "L" : "M"}${sx(t)},${sy(w)}`;
+        if (wr <= YMAX) reno += `${i ? "L" : "M"}${sx(t)},${sy(wr)}`;
+      }
+      out("cubic").setAttribute("d", cubic);
+      out("reno").setAttribute("d", reno);
+      for (const a of ["y1", "y2"]) out("wmaxLine").setAttribute(a, String(sy(1)));
+      out("wmaxText").setAttribute("y", String(sy(1) - 6));
+      const kx = sx(Math.min(k, T));
+      for (const a of ["x1", "x2"]) out("kLine").setAttribute(a, String(kx));
+      out("kText").setAttribute("x", String(kx));
+      const renoBack = 0.5 * wmax * rtt;
+      out("wV").textContent = `${wmax} packets`;
+      out("rV").textContent = `${rtt * 1000} ms`;
+      out("kV").textContent = secs(k);
+      out("renoV").textContent = secs(renoBack);
+      out("msg").innerHTML = friendly
+        ? `Small window and short RTT: the cubic curve would grow slower than Reno here, so CUBIC follows its <b>Reno-friendly</b> estimate instead (the straight part of the blue line).`
+        : `CUBIC climbs fast, flattens out near W_max, then speeds up again. K depends only on W_max, not on RTT. Change the RTT and only the amber Reno line moves.`;
+    };
+
+    root.querySelectorAll("input").forEach((i) => i.addEventListener("input", render));
+    render();
+  });
+</script>

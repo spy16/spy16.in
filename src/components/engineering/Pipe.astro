@@ -1,0 +1,106 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="pipe">
+  <span class="w-label">one flow · 100 Mbps bottleneck · 40 ms base RTT · BDP ≈ 333 packets</span>
+  <div class="w-fig">
+    <svg viewBox="0 0 600 300" role="img" aria-label="Delivery rate and RTT against data in flight">
+      <rect class="pp-loss" data-out="lossZone" x="0" y="10" width="0" height="270" />
+      <line class="gridline" data-out="bdpLine" x1="0" x2="0" y1="10" y2="280" />
+      <text class="svglabel" data-out="bdpText" y="24" text-anchor="middle">BDP</text>
+      <text class="svglabel" data-out="lossText" y="24" text-anchor="middle">drops</text>
+      <text class="svglabel" x="44" y="24">delivery rate</text>
+      <text class="svglabel" x="44" y="164">RTT</text>
+      <path class="curve" data-out="rate" />
+      <path class="curve pp-rtt" data-out="rtt" />
+      <line class="pp-cursor" data-out="cursor" y1="10" y2="280" />
+      <circle class="dot" data-out="dotRate" r="6" />
+      <circle class="dot pp-dot2" data-out="dotRtt" r="6" />
+      <text class="svglabel" x="40" y="296">0</text>
+      <text class="svglabel" x="580" y="296" text-anchor="end">data in flight →</text>
+    </svg>
+  </div>
+  <div class="w-controls">
+    <label class="w-ctl">data in flight <b data-out="inflightV"></b><input type="range" data-in="inflight" min="0" max="1000" value="200" /></label>
+    <label class="w-ctl">bottleneck buffer <b data-out="bufV"></b><input type="range" data-in="buf" min="40" max="666" value="333" /></label>
+  </div>
+  <div class="w-readout">
+    <div class="w-cell"><span>delivery rate</span><b class="w-fwd" data-out="rateV"></b></div>
+    <div class="w-cell"><span>RTT</span><b class="w-grad" data-out="rttV"></b></div>
+    <div class="w-cell"><span>queue at the bottleneck</span><b data-out="qV"></b></div>
+  </div>
+  <p class="w-explain" data-out="msg"></p>
+</div>
+
+<style is:global>
+  .w .pp-loss { fill: rgb(255 92 92 / 0.08); }
+  .w .curve.pp-rtt { stroke: var(--grad); }
+  .w .pp-cursor { stroke: var(--color-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+  .w .dot.pp-dot2 { fill: var(--grad); }
+</style>
+
+<script>
+  import { $, mountAll } from "../widget/widget";
+
+  const BW = 100e6 / 8 / 1500; // packets per second
+  const RTT0 = 40; // ms
+  const BDP = (BW * RTT0) / 1000;
+  const XMAX = 1000;
+  const X0 = 40, X1 = 580;
+  const RATE_Y = [140, 30]; // y for 0 and 100 Mbps
+  const RTT_Y = [280, 170]; // y for 0 and 140 ms
+  const RTT_MAX = 140;
+
+  mountAll("pipe", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const inp = (k: string) => $<HTMLInputElement>(root, `[data-in="${k}"]`);
+    const sx = (p: number) => X0 + (p / XMAX) * (X1 - X0);
+    const ry = (mbps: number) => RATE_Y[0] + (mbps / 100) * (RATE_Y[1] - RATE_Y[0]);
+    const ty = (ms: number) => RTT_Y[0] + (Math.min(ms, RTT_MAX) / RTT_MAX) * (RTT_Y[1] - RTT_Y[0]);
+
+    const model = (p: number, buf: number) => {
+      const q = Math.min(Math.max(p - BDP, 0), buf);
+      return { rate: Math.min(p / BDP, 1) * 100, q, rtt: RTT0 + (q / BW) * 1000, drop: p > BDP + buf };
+    };
+
+    const render = () => {
+      const p = +inp("inflight").value, buf = +inp("buf").value;
+      let rate = "", rtt = "";
+      for (let x = 0; x <= XMAX; x += 5) {
+        const m = model(x, buf);
+        rate += `${x ? "L" : "M"}${sx(x)},${ry(m.rate)}`;
+        rtt += `${x ? "L" : "M"}${sx(x)},${ty(m.rtt)}`;
+      }
+      out("rate").setAttribute("d", rate);
+      out("rtt").setAttribute("d", rtt);
+      const bx = sx(BDP), lx = sx(BDP + buf);
+      for (const k of ["x1", "x2"]) out("bdpLine").setAttribute(k, String(bx));
+      out("bdpText").setAttribute("x", String(bx));
+      out("lossZone").setAttribute("x", String(lx));
+      out("lossZone").setAttribute("width", String(Math.max(0, X1 - lx)));
+      out("lossText").setAttribute("x", String(Math.min(lx + 24, X1 - 10)));
+      const m = model(p, buf);
+      for (const k of ["x1", "x2"]) out("cursor").setAttribute(k, String(sx(p)));
+      out("dotRate").setAttribute("cx", String(sx(p)));
+      out("dotRate").setAttribute("cy", String(ry(m.rate)));
+      out("dotRtt").setAttribute("cx", String(sx(p)));
+      out("dotRtt").setAttribute("cy", String(ty(m.rtt)));
+      out("inflightV").textContent = `${p} packets`;
+      out("bufV").textContent = `${buf} packets`;
+      out("rateV").textContent = `${m.rate.toFixed(0)} Mbps`;
+      out("rttV").textContent = `${m.rtt.toFixed(0)} ms`;
+      out("qV").textContent = `${m.q.toFixed(0)} packets`;
+      out("msg").innerHTML = m.drop
+        ? `More than BDP + buffer is in flight. The buffer is full and the bottleneck <b>drops packets</b>. This is the only point where a loss-based sender learns it went too far.`
+        : p < BDP * 0.97
+          ? `Less than one BDP in flight. The link sits idle part of the time, so the rate is below 100 Mbps. RTT is just the propagation delay.`
+          : p <= BDP * 1.03
+            ? `About one BDP in flight: <b>full rate and minimum RTT</b>. This is the point BBR tries to sit at.`
+            : `Past the BDP the rate can't go up any more. The extra packets just wait in the buffer, and every packet now takes longer.`;
+    };
+
+    root.querySelectorAll("input").forEach((i) => i.addEventListener("input", render));
+    render();
+  });
+</script>
