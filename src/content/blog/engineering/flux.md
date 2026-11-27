@@ -146,13 +146,13 @@ In these flows, the order of steps rarely changes. The rules inside each step ch
 
 ## What it cost
 
-Temporal records every decision in the history. Flux re-derives decisions from task state on each replay, and that bit me in production. `flux.Race` cancelled the losing tasks with the winner's exact `finished_at`. On the next replay, they were all terminal at the same instant, the tie-break picked index 0, and the flow took the wrong branch. The fix was to cancel losers 1ms after the winner, but the lesson is general: **in a replayed workflow, every timestamp you write is an input to a decision you will make again.**
+Temporal records every decision in the history. Flux re-derives every decision from task state on each replay, which is simpler and also bit me in production. How that replay works, with a plain Go function suspended by a `panic`, is in [part 2](/posts/engineering/flux-internals/).
 
 Matching tasks by name also cuts both ways. A flow whose branch changes mid-flight doesn't crash. It quietly leaves the old branch's tasks orphaned.
 
 And the UI, metrics, retention and expiry were all mine to build, with their own bugs.
 
-Most of the code in these flows isn't the happy path. It's the many different ways a step can be not done yet.
+Most of the code in these flows is about the many ways a step can be not done yet.
 
 [^1]: Temporal docs, [Workflow Definition](https://docs.temporal.io/workflow-definition): deterministic constraints, replay compares Commands with the Event History, and Activities "execute outside the replay path and are automatically retried".
 [^2]: Temporal Go SDK v1.33.0, `client.Client.CompleteActivity` and `activity.ErrResultPending` (`client/client.go`, `internal/error.go`).
