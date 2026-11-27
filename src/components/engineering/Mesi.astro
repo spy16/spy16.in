@@ -1,0 +1,130 @@
+---
+import "../widget/widget.css";
+---
+
+<div class="w not-prose" data-widget="mesi">
+  <span class="w-label">two cores · one cache line · a snooping bus</span>
+  <div class="ms-cores">
+    {[0, 1].map((i) => (
+      <div class="ms-core">
+        <span>core {i}</span>
+        <b data-out={`s${i}`}>I</b>
+        <em data-out={`m${i}`} />
+        <div class="w-btns">
+          <button class="w-btn" data-act={`r${i}`}>Read</button>
+          <button class="w-btn" data-act={`w${i}`}>Write</button>
+        </div>
+      </div>
+    ))}
+  </div>
+  <div class="w-controls">
+    <div class="w-btns">
+      <button class="w-btn" data-act="mesi" aria-pressed="true">MESI</button>
+      <button class="w-btn" data-act="msi" aria-pressed="false">MSI</button>
+      <button class="w-btn ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <div class="w-readout">
+    <div class="w-cell"><span>bus messages</span><b class="w-grad" data-out="bus">0</b></div>
+    <div class="w-cell"><span>accesses served by the cache alone</span><b class="ms-ok" data-out="hits">0</b></div>
+    <div class="w-cell"><span>memory copy</span><b data-out="mem">up to date</b></div>
+  </div>
+  <p class="w-explain" data-out="log">Both caches start empty (I). Read on core 0, then write on core 0, and watch the bus counter.</p>
+</div>
+
+<style is:global>
+  .w .ms-cores { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+  .w .ms-core { border: 1px solid var(--rule); border-radius: 0.6rem; padding: 0.6rem 0.75rem; display: grid; gap: 0.3rem; font: 0.72rem var(--font-mono); color: var(--color-dim); }
+  .w .ms-core b { font: 600 2rem var(--font-mono); line-height: 1.1; color: var(--color-dim); }
+  .w .ms-core b.M { color: var(--grad); }
+  .w .ms-core b.E { color: var(--ok); }
+  .w .ms-core b.S { color: var(--fwd); }
+  .w .ms-core em { font-style: normal; color: var(--color-fg); min-height: 2.6em; }
+  .w .ms-ok { color: var(--ok); }
+</style>
+
+<script>
+  import { $, mountAll } from "../widget/widget";
+
+  type St = "M" | "E" | "S" | "I";
+  const MEANING: Record<St, string> = {
+    M: "modified: only copy, memory is stale",
+    E: "exclusive: only copy, memory agrees",
+    S: "shared: read-only, others may have it",
+    I: "invalid: not usable",
+  };
+
+  mountAll("mesi", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const btn = (k: string) => $<HTMLButtonElement>(root, `[data-act="${k}"]`);
+    let s: St[] = ["I", "I"], memOk = true, mesi = true, bus = 0, hits = 0;
+
+    const render = (msg: string) => {
+      s.forEach((v, i) => {
+        const b = out(`s${i}`);
+        b.textContent = v;
+        b.className = v;
+        out(`m${i}`).textContent = MEANING[v];
+      });
+      out("bus").textContent = String(bus);
+      out("hits").textContent = String(hits);
+      out("mem").textContent = memOk ? "up to date" : "stale";
+      out("log").innerHTML = msg;
+    };
+
+    const read = (i: number) => {
+      const j = 1 - i;
+      if (s[i] !== "I") { hits++; return render(`Core ${i} reads its own <b>${s[i]}</b> copy. No bus traffic.`); }
+      bus++;
+      if (s[j] === "M") {
+        s = ["S", "S"]; memOk = true;
+        return render(`Core ${i} broadcasts <b>Read</b>. Core ${j} has the line in <b>M</b>, so it supplies the data, writes it back to memory, and both end in <b>S</b>.`);
+      }
+      if (s[j] !== "I") {
+        const from = s[j] === "E" ? `core ${j}'s cache` : "memory";
+        s = ["S", "S"];
+        return render(`Core ${i} broadcasts <b>Read</b>. Core ${j} asserts "shared", so both end in <b>S</b>. Data comes from ${from}.`);
+      }
+      s[i] = mesi ? "E" : "S";
+      return render(mesi
+        ? `Core ${i} broadcasts <b>Read</b>. Nobody asserts "shared", so it takes the line in <b>E</b>. A write now needs no bus message.`
+        : `Core ${i} broadcasts <b>Read</b>. MSI has no E, so the line lands in <b>S</b> even though nobody else has it.`);
+    };
+
+    const write = (i: number) => {
+      const j = 1 - i;
+      if (s[i] === "M") { hits++; return render(`Core ${i} already owns the line in <b>M</b>. It just writes.`); }
+      if (s[i] === "E") {
+        hits++; s[i] = "M"; memOk = false;
+        return render(`<b>E</b> to <b>M</b> silently. Nobody else has a copy, so there is nobody to tell.`);
+      }
+      bus++;
+      const had = s[j];
+      if (s[i] === "S") {
+        s = i === 0 ? ["M", "I"] : ["I", "M"]; memOk = false;
+        return render(`Core ${i} broadcasts <b>Invalidate</b> and waits for acknowledgements${had === "S" ? `. Core ${j} drops its copy to <b>I</b>` : ""}. Core ${i} goes to <b>M</b>.`);
+      }
+      s = i === 0 ? ["M", "I"] : ["I", "M"]; memOk = false;
+      return render(had === "M"
+        ? `Core ${i} broadcasts <b>Read invalidate</b>. Core ${j} hands over its dirty line and drops to <b>I</b>. Core ${i} goes to <b>M</b>. Memory is still stale.`
+        : `Core ${i} broadcasts <b>Read invalidate</b>: fetch the line and kill every other copy in one message. Core ${i} goes to <b>M</b>.`);
+    };
+
+    const setProto = (m: boolean) => {
+      mesi = m;
+      btn("mesi").setAttribute("aria-pressed", String(m));
+      btn("msi").setAttribute("aria-pressed", String(!m));
+      reset();
+    };
+    const reset = () => { s = ["I", "I"]; memOk = true; bus = 0; hits = 0; render(`Both caches start empty (I). Read on core 0, then write on core 0, and watch the bus counter.`); };
+
+    [0, 1].forEach((i) => {
+      btn(`r${i}`).addEventListener("click", () => read(i));
+      btn(`w${i}`).addEventListener("click", () => write(i));
+    });
+    btn("mesi").addEventListener("click", () => setProto(true));
+    btn("msi").addEventListener("click", () => setProto(false));
+    btn("reset").addEventListener("click", reset);
+    reset();
+  });
+</script>

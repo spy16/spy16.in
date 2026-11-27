@@ -1,0 +1,89 @@
+---
+title: "MESI: how cores agree on a cache line"
+pubDate: 2026-11-27
+publish: true
+description: |
+  Every core has its own cache, yet a write on one core shows up on all the others. MESI is the protocol that makes this work, one cache line at a time.
+tags: [deep-tech, hardware, concurrency, perf]
+---
+
+import Mesi from "../../../components/engineering/Mesi.astro";
+
+In [When sharing is bad](/posts/engineering/sharing-is-bad/), two counters on the same cache line were ~10x slower than the same counters padded onto separate lines. I blamed "the cache-coherence protocol" and moved on. This post is about that protocol.
+
+## Problem
+
+Every core has its own private caches. So the same 64-byte line of memory can sit in two cores' L1 at the same time. That's fine while both only read it. But what happens when core 0 writes to its copy? Core 1 is still holding the old bytes, and nothing stops it from reading them.
+
+The rule a coherent system has to keep is called the **single-writer, multiple-reader (SWMR) invariant**: for any memory location, at any moment, either one core may write it (and read it), or any number of cores may only read it [^1]. On top of that, a value has to carry over: whoever reads next must see the last write [^1].
+
+The simple way to keep this rule is to send every write to memory and have every other cache throw away its copy. That works, but then every store is a trip over the shared bus, even for data no other core will ever touch. What we want is for writes to stay inside the core's cache when nobody else cares, and to pay for coordination only when somebody does.
+
+## Four states
+
+MESI tracks this per cache line with two bits of state [^2]. Intel's manual describes the four states like this [^2]:
+
+| State | Valid? | Memory copy | Copies in other caches? | A write to this line... |
+| --- | --- | --- | --- | --- |
+| **M**odified | yes | out of date | no | stays in the cache |
+| **E**xclusive | yes | valid | no | stays in the cache |
+| **S**hared | yes | valid | maybe | first gains exclusive ownership |
+| **I**nvalid | no | | maybe | goes to the bus |
+
+The caches keep this table honest by **snooping**: every cache watches the requests other cores put on the bus and reacts to the ones that touch lines it holds [^3]. McKenney lists the messages a shared-bus MESI system needs [^4]:
+
+- `Read`: give me this line.
+- `Read invalidate`: give me this line, and everyone else drop it.
+- `Invalidate`: everyone else drop this line (I already have the data).
+- `Invalidate acknowledge`, `Read response` and `Writeback` to answer them.
+
+### Reading
+
+A read that hits in M, E or S is served by the cache. No message.
+
+A read that misses sends `Read`. If another core has the line in M, it has the only good copy, so it supplies the data and the line gets written back to memory [^3]. Both copies end in S.
+
+If nobody else has the line at all, the reader takes it in **E**. How does it know nobody has it? One way, on a shared bus: every cache that holds the line asserts a wired-OR "shared" signal while the request is on the bus. If nobody asserts it, the reader goes to E, otherwise to S [^1].
+
+### Writing
+
+- In **M**, just write.
+- In **E**, just write and move to M. Nobody else has a copy, so there is nobody to tell. Intel's table says it directly: the write "does not go to the system bus" [^2].
+- In **S**, send `Invalidate` and wait until every other cache acknowledges, then move to M [^4].
+- In **I**, send `Read invalidate`, which fetches the line and kills every other copy in one message [^4]. If another core had it in M, that core hands over the data and drops to I.
+
+## Why E exists
+
+Drop E and you get MSI. It's still correct, but look at a very common pattern: read a variable, then write it (e.g., `x++` on data only this thread touches). In MSI the read miss brings the line in as S, and the write has to go to the bus again to upgrade it. In MESI the read brings it in as E and the write is silent. The primer on coherence puts it as: E "can thus eliminate half of the coherence transactions in this common scenario" [^1]. That's why almost every commercial protocol has it [^1].
+
+Try it: on MESI, read then write on core 0 and count bus messages. Switch to MSI and do the same. Then alternate writes between the two cores.
+
+<Mesi />
+
+## Back to the counters
+
+That last experiment is the false-sharing loop. Two threads increment `c1` and `c2`, which share one line. Under MESI it goes like this:
+
+1. Core 0 holds the line in M and increments `c1` locally.
+2. Core 1 wants to increment `c2`. Its copy is I, so it sends `Read invalidate`. Core 0 hands over the line and drops to I.
+3. Core 0 wants `c1` again. Its copy is I. `Read invalidate`. The line moves back.
+
+Every increment is now a cache-to-cache transfer, and moving a line between caches costs "a few orders of magnitude more" than a simple register-to-register instruction [^4]. With the padding, each counter's line sits in M in its own core forever, and every increment is the "in M, just write" case.
+
+**Note**: those runs were on an Apple M2, and Apple doesn't publish its coherence protocol. So take the steps above as how it plays out under MESI, not as a trace of the M2.
+
+## What real chips add
+
+MESI is the textbook base. Real systems change it in a few ways:
+
+- **Owned (O).** In MESI, a core in M that gets a `Read` has to send the line to memory as well as to the reader. MOESI adds O: a dirty line that others may read, where the owner answers requests and memory stays stale [^1].
+- **Forward (F).** Intel's QuickPath Interconnect uses MESIF. F is a clean, read-only state like S, but only one cache holds the line in F, and that cache is the one that answers requests for it [^1].
+- **Directories.** Snooping broadcasts every request, and "broadcasting does not scale" [^1]. Bigger systems track which caches hold each line and send messages only to them [^1].
+- **Store buffers and invalidate queues.** Waiting for every `Invalidate acknowledge` before a store would stall the core. So cores park stores in a store buffer and queue incoming invalidations to apply later. That keeps the core moving, but it also lets other cores see your writes in a surprising order, which is why memory barriers exist [^4].
+
+So the hardware keeps every cache line in one of four states, and the expensive part is just one core asking the others to let go.
+
+[^1]: Nagarajan, Sorin, Hill, Wood, [A Primer on Memory Consistency and Cache Coherence, Second Edition](https://pages.cs.wisc.edu/~markhill/papers/primer2020_2nd_edition.pdf), 2020. SWMR and data-value invariants in section 2.4; E state in 7.3; O state in 7.4; snooping vs. directories in 6.4.3; Intel QPI in 8.8.4.
+[^2]: Intel, [Intel 64 and IA-32 Architectures Software Developer's Manual](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html), Vol. 3A, section 14.4 "Cache Control Protocol", Table 14-4.
+[^3]: Same manual, Vol. 3A, section 14.2 "Caching Terminology", on snooping and writing back modified lines.
+[^4]: Paul E. McKenney, [Memory Barriers: a Hardware View for Software Hackers](http://www.rdrop.com/users/paulmck/scalability/paper/whymb.2010.06.07c.pdf), 2010. Sections 2 to 4.
