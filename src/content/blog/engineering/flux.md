@@ -1,71 +1,119 @@
 ---
-title: "Workflows where every step is a conversation"
+title: "Long-running workflows are mostly failure handling"
 pubDate: 2026-11-27
 publish: true
 description: |
-  Why I built flux, a workflow engine that keeps each step's state machine in the task, for ops-heavy and compliance-heavy flows where Temporal's model puts the replay constraint on the code that changes most.
+  Ops-heavy, compliance-heavy flows with 20+ steps, each a state machine of its own. Why a table per step stops working, and what I built instead.
 tags: [golang, workflows, architecture]
 ---
 
-I built **flux**, a durable workflow engine in Go. The first question anyone asks is: why not Temporal?
+The flows I worked on had 20+ independent steps. Each step was a big state machine on its own: uploading data to a vendor and tracking what happened to it, handling its failures, pausing while a third party was down for maintenance, and getting rewound when we found a problem weeks later. I ended up building a workflow engine, **flux**, for them.
 
-My first answer used to be "these workflows aren't deterministic, and Temporal needs deterministic workflows". That turned out to be the wrong way to put it. This post is the better answer.
+This post is about why this kind of workflow gets complicated, and why the simple design stops working.
 
-## Problem
+## One step
 
-Some workflows are mostly automation: charge the card, reserve stock, send the email. Temporal is great at these.
+Take one step: submit a customer's record to an external registry. On a good day it's one API call. Here is what it can look like over its lifetime:
 
-Others are mostly people. Think of account opening with KYC, loan underwriting, insurance claims, vendor onboarding. They are **ops-heavy** and **compliance-heavy**, and almost every step is a conversation with three parties:
+1. We build the payload and upload it. The request times out. Did the upload land or not?
+2. It did. The registry says "processing", and keeps saying it for hours.
+3. It rejects the record because a field doesn't match its own data. Retrying won't help: the user has to fix it, or ops has to approve the mismatch.
+4. The user fixes it days later. The registry is down for its nightly maintenance window, so the resubmission has to wait until morning without counting as a failure.
+5. The registry allows only a few attempts per day per record. We hit the limit.
+6. It finally goes through. Weeks later, someone finds that the submitted data was wrong. Now we need to redo this step, and every step after it that used its result.
 
-1. **The user**, who uploads a document, fixes a typo, and comes back two days later.
-2. **A third party** (e.g., a government registry or a credit bureau), which answers slowly, calls back on a webhook, or allows only a few attempts a day.
-3. **An ops or compliance person**, who sometimes has to step in: approve a mismatch, reset a step to manual entry, waive a document.
+Now multiply that by 20 steps, by every customer who is somewhere in the middle, and by a deploy every few days.
 
-Take something as small as "verify an identity document". Written as a state machine, it looks like this:
+## The failures have different shapes
+
+Steps fail in several different ways, and each one needs a different response:
+
+| Failure | Example | What it needs |
+| --- | --- | --- |
+| Transient | timeout, 5xx | retry with backoff |
+| Unknown outcome | sent, no answer | check status or use an idempotency key, never a blind retry |
+| Rejection | data mismatch | a person or the user, not a retry |
+| Not now | maintenance window, daily limit | wait until a time, don't count it as a failure |
+| Waiting on a human | user uploads, ops review | hours to weeks, then expiry |
+| Found later | succeeded, but was wrong | redo the step and everything that depended on it |
+| Concurrent actors | worker retry, webhook and ops click at once | exactly one of them wins |
+| Code changes | new rule while thousands are mid-flow | in-flight state stays valid |
+
+And because these are compliance-heavy flows, every transition and every manual override needs a record of who did what, and when.
+
+## A table per step
+
+The obvious design is a table per step, with its own schema:
+
+```sql
+CREATE TABLE registry_submissions (
+    customer_id     BIGINT PRIMARY KEY,
+    status          TEXT NOT NULL,  -- pending, uploaded, processing, rejected, done
+    vendor_ref      TEXT,
+    attempts        INT  NOT NULL DEFAULT 0,
+    attempts_today  INT  NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ,
+    locked_until    TIMESTAMPTZ,
+    last_error      TEXT,
+    updated_at      TIMESTAMPTZ NOT NULL
+);
+```
+
+Plus a job that picks rows where `next_attempt_at` has passed and nobody holds the lock. For one or two steps, this is the right answer. It's simple, and you can read everything with SQL.
+
+At 20 steps, this is what goes wrong:
+
+1. Only `status` values and `vendor_ref` are specific to this step. `attempts`, `next_attempt_at`, `locked_until`, `last_error` are machinery, and the machinery is copied into every table. Each copy is a new chance to get the backoff, the lock expiry or the retry count wrong.
+2. The flow exists nowhere. "When the registry submission is done, create the bank verification row" lives inside the success path of the previous step. To find out what happens after step 7, you grep.
+3. Rewind is an incident. Which rows in which tables were derived from the bad one? Nothing records that, so someone works it out and writes SQL by hand.
+4. Every table needs its own admin screen, metrics and audit trail. Ops can only do what someone built a button for, so they end up asking engineers for `UPDATE` statements. That's exactly what compliance doesn't want.
+5. Every time a step's state grows, it's another migration.
+
+## One table for every step
+
+Look at what's actually different between those tables: the stage names, the step's own data, and the code that runs in each stage. Everything else is the same.
+
+So flux has one `tasks` table. A row has a `kind`, a `stage`, its `data` as JSON, a status, an attempt count, the next time it should run, a revision, and the tasks it depends on. Each kind registers a state machine:
 
 ```go
-task.BindFSM(mgr, VerifyDocSpec, task.FSM[DocData, DocResult]{
-    "pending":        {task.ActionSync: autoFetch, "manual": resetToInput},
-    "pending.input":  {"submit": handleSubmit},
-    "pending.verify": {task.ActionSync: callRegistry},
-    "pending.review": {"approve": approve, "reject": reject, "manual": resetToInput},
-    "failed.limit":   {task.ActionSync: retryLater},
+task.BindFSM(mgr, SubmitSpec, task.FSM[SubmitData, SubmitResult]{
+    "pending":          {task.ActionSync: upload},
+    "pending.uploaded": {task.ActionSync: pollStatus, "callback": onCallback},
+    "pending.rejected": {"resubmit": upload, "approve": approve},
 })
 ```
 
-To give you a summary:
+And a handler is plain Go:
 
-1. One step of the workflow is itself a state machine with several stages.
-2. It moves on actions from different sources: `sync` from a background worker, `submit` from the user, `approve`/`reject`/`manual` from ops.
-3. Handlers talk to the outside world, and some stages park themselves (e.g., "daily limit hit, try again in an hour").
+```go
+func upload(ctx context.Context, tc task.Ctx[SubmitData, SubmitResult]) (task.Ctx[SubmitData, SubmitResult], error) {
+    if until, down := registry.MaintenanceUntil(time.Now()); down {
+        return tc.SyncAfter(time.Until(until)), nil // not now, and not a failure
+    }
+    ref, err := registry.Upload(ctx, tc.Data.Payload, tc.Task.UID) // task UID as idempotency key
+    if err != nil {
+        return tc, err // retried with backoff, then parked as faulted
+    }
+    tc.Data.VendorRef = ref
+    return tc.Goto("pending.uploaded", tc.Data).SyncAfter(5 * time.Minute), nil
+}
+```
 
-A real flow has dozens of steps like this, and the rules inside each step change all the time: a new regulation, a vendor that changed its response, a product tweak.
+To give you a summary of what every step now gets once, instead of 20 times:
 
-So the real question is: where does this state machine live?
+1. Retries with backoff only when the handler returns an error. `SyncAfter` without an error just reschedules, so "not now" doesn't burn attempts.
+2. A task that runs out of retries goes to `faulted` and waits for a human, without failing the flow around it.
+3. Actions from anywhere: a worker sends `sync`, a webhook sends `callback`, the user's app or an ops tool sends `resubmit`/`approve`. An action that isn't valid in the current stage is rejected, so an ops override goes through the same rules as everything else.
+4. Every write checks the revision, so when a retry, a webhook and an ops click land at once, one wins and the others see a conflict.
+5. One admin API, one set of metrics, and one event log. Every transition and every manual patch is written as an event, which is the audit trail.
 
-## Where it lives in Temporal
+## The order in one place
 
-Temporal's rule is that workflow code must be deterministic. On replay, the SDK re-runs your workflow code and compares what it does with the recorded event history, and a mismatch is a non-determinism error [^1]. Anything non-deterministic (API calls, I/O) goes into **activities**, which run outside the replay path and are retried [^1].
-
-So "it isn't deterministic" is not a reason by itself: the registry call would simply be an activity. The state machine is the problem. There are two places to put it:
-
-**In an activity.** An activity is one call that eventually finishes. It can hand its completion to an outside system with a task token (`client.CompleteActivity`) [^2], and it can carry heartbeat details across retries [^3]. But it can't sit in `pending.review` for two days and accept a `submit` from the user and later an `approve` from compliance, each going to a different handler.
-
-**In the workflow** (or a child workflow per step), with Signals for user/ops actions and Updates where the caller needs an answer [^4]. This works, and it's how Temporal wants you to do it. But now every stage of every step is workflow code. Every user tap is an event in the history. And changing a step's rules for the people already halfway through it needs versioning (`workflow.GetVersion` in Go) [^5].
-
-That last part is what hurts in these flows. The order of steps rarely changes. The logic inside the steps changes every few weeks. Temporal puts the replay constraint exactly on the code you change the most.
-
-## What flux does
-
-Flux splits Temporal's "workflow" into two layers.
-
-### The workflow is a thin scheduler
-
-A flux workflow is a Go function that only decides which tasks run and in what order. It is replayed from the start every time something changes, and it has the same determinism rules as Temporal: no `time.Now()`, no random, no I/O.
+The steps still need an order. Some run in parallel, some wait for others, some race a deadline. Instead of "on success, insert the next row", the order lives in one Go function:
 
 ```go
 func accountOpening(env flux.Env, in Input) error {
-    if _, err := flux.SpawnAwait(env, "verify-identity", VerifyDocSpec, in.Identity); err != nil {
+    if _, err := flux.SpawnAwait(env, "submit-registry", SubmitSpec, in.Record); err != nil {
         return err
     }
 
@@ -84,57 +132,30 @@ func accountOpening(env flux.Env, in Input) error {
 }
 ```
 
-`Spawn` looks the task up by name in the stored snapshot and creates it only if it isn't there. `Await` returns the stored result if the task is done, and suspends the workflow if it isn't.
+This function never does I/O. It's replayed from the top every time a task finishes: `Spawn` finds an existing task by name or creates it, and `Await` returns the stored result or suspends.
 
-### The task is the durable state machine
+Because `Spawn` records which tasks each new task depends on, rewind stops being an incident. `Rewind` on a task with `dry_run` lists that task and everything that transitively depended on it. Applying it discards them, and the next replay doesn't find them by name, so it creates them again. Problem 6 from the start of this post becomes one API call.
 
-A task is a row in Postgres with a `stage`, its data, and a revision. Its handlers are plain Go: they call vendors, read the clock, do whatever they need. **Task handlers are never replayed.** Each action runs the handler for the current stage once, and the result is written back with an optimistic-concurrency check on the revision:
+## Why not Temporal?
 
-```go
-func callRegistry(ctx context.Context, tc task.Ctx[DocData, DocResult]) (task.Ctx[DocData, DocResult], error) {
-    if tc.Data.AttemptsToday >= dailyLimit {
-        return tc.Goto("failed.limit", tc.Data).SyncAfter(time.Hour), nil
-    }
-    res, err := registry.Verify(ctx, tc.Data.Number)
-    if err != nil {
-        return tc, err // retried with backoff, then parked as faulted
-    }
-    if !res.Match {
-        return tc.Goto("pending.review", tc.Data), nil
-    }
-    return tc.Done(DocResult{Verified: true}), nil
-}
-```
+Temporal gives you the "order in one place" part, and more. Its rule is that workflow code is deterministic: on replay it's re-run and checked against the recorded history, and non-deterministic work goes into activities [^1].
 
-Actions come from anywhere: a worker sends `sync`, your API forwards the user's `submit`, a webhook sends `callback`, an admin tool sends `approve`. A task marked `External` never runs on its own and only moves when someone acts on it. When a task reaches a terminal status, it bumps the workflow's wake counter, a reconciler claims the workflow, replays the thin scheduler, and the scheduler sees the result.
+The trouble is the 20 state machines. In Temporal there are two places to put one. An activity is one call that eventually finishes. It can be completed from outside with a task token [^2] and keep heartbeat details across retries [^3], but it can't sit in `pending.rejected` for two days and take a `resubmit` from the user or an `approve` from ops. The other place is workflow code, with Signals and Updates for those actions [^4]. That works, but then every stage of every step is replayed code, and changing a step's rules for people already in it needs versioning [^5].
 
-This is the whole point: **the code that changes most is code that is never replayed**. A deploy changes how the next action on a task is handled. The task's stored stage is all that has to stay compatible, which is the same kind of compatibility as any database row.
-
-### Ops and compliance get an API, not a database console
-
-Because a task is a row with a stage, the things ops needs are small, boring operations:
-
-- **Send an action** to a task, the same path the user's app takes. The state machine decides whether it's allowed: an action that isn't valid in the current stage is rejected. So an override can't skip rules the way a raw `UPDATE` can.
-- **Patch** a task's data, stage or status (e.g., mark it done with an output), as a last resort. The patch is written as an event, so "who changed what, and when" has an answer.
-- **Rewind**: discard a task and everything that depended on it. The next replay doesn't find them by name, so it creates them again.
-- **Terminate** a workflow.
-- A task that runs out of retries goes to `faulted` and waits for a human, without failing the workflow around it.
-
-Temporal's closest tool is Reset, which ends the execution and starts a new one that replays the history up to a chosen point [^6]. That's the right tool for "redo everything after here". Rewind is for "redo the address check and only what came from it".
+In these flows, the order of steps rarely changes. The rules inside each step change every few weeks. In flux, only the thin scheduler is replayed. The task handlers, the code that changes most, never are.
 
 ## What it cost
 
-There's a reason Temporal records decisions in the history. Flux doesn't: every decision is re-derived from task state on each replay. That bit me in production. `flux.Race` cancelled the losing tasks with the winner's exact `finished_at`. On the next replay, all of them were terminal at the same instant, the timestamp comparison tied, and the index tie-break picked task 0, so the workflow took the wrong branch. The fix was to cancel losers 1ms after the winner. The lesson is the general one: **in a replayed workflow, every timestamp you write is an input to a decision you will make again.** Temporal doesn't have this problem, because the winner is in the history.
+Temporal records every decision in the history. Flux re-derives decisions from task state on each replay, and that bit me in production. `flux.Race` cancelled the losing tasks with the winner's exact `finished_at`. On the next replay, they were all terminal at the same instant, the tie-break picked index 0, and the flow took the wrong branch. The fix was to cancel losers 1ms after the winner, but the lesson is general: **in a replayed workflow, every timestamp you write is an input to a decision you will make again.**
 
-Matching tasks by name also has two sides. A workflow whose branch changes mid-flight doesn't crash with a non-determinism error. It quietly leaves the old branch's tasks orphaned. That's friendlier on a deploy, and much harder to notice.
+Matching tasks by name also cuts both ways. A flow whose branch changes mid-flight doesn't crash. It quietly leaves the old branch's tasks orphaned.
 
-And everything Temporal gives you out of the box (a UI, metrics, retention, expiry) I had to build, and each one came with its own bugs.
+And the UI, metrics, retention and expiry were all mine to build, with their own bugs.
 
-If a flow is mostly automation, Temporal's model costs very little. For flows where every step is a long conversation with a user, a third party and a compliance team, the state wanted to live in the task, not in the replay.
+Most of the code in these flows isn't the happy path. It's the many different ways a step can be not done yet.
 
-[^1]: Temporal docs, [Workflow Definition](https://docs.temporal.io/workflow-definition): deterministic constraints, replay compares Commands with the Event History, and Activities "execute outside the replay path and are automatically retried". Also [Activity Definition](https://docs.temporal.io/activity-definition).
+[^1]: Temporal docs, [Workflow Definition](https://docs.temporal.io/workflow-definition): deterministic constraints, replay compares Commands with the Event History, and Activities "execute outside the replay path and are automatically retried".
 [^2]: Temporal Go SDK v1.33.0, `client.Client.CompleteActivity` and `activity.ErrResultPending` (`client/client.go`, `internal/error.go`).
 [^3]: Temporal docs, [Activity timeouts and heartbeats](https://docs.temporal.io/develop/python/activities/timeouts): a retried Activity can read the `details` from the last heartbeat.
 [^4]: Temporal docs, [Sending messages](https://docs.temporal.io/sending-messages): Signals, Queries and Updates.
 [^5]: Temporal docs, [Versioning in Go](https://docs.temporal.io/develop/go/versioning).
-[^6]: Temporal docs, [Events and Event History](https://docs.temporal.io/workflow-execution/event): "A Reset terminates a Workflow Execution and creates a new Workflow Execution with the same Workflow Type and Workflow ID."
