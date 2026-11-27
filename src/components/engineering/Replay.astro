@@ -1,0 +1,260 @@
+---
+import "../widget/widget.css";
+
+const CODE = [
+  "func openAccount(env flux.Env, in Input) error {",
+  '    id, err := flux.SpawnAwait(env, "verify-identity", IdentitySpec, in)',
+  "    if err != nil {",
+  "        return err",
+  "    }",
+  "    if !id.Match {",
+  '        _, err = flux.SpawnAwait(env, "manual-review", ReviewSpec, in)',
+  "        if err != nil {",
+  "            return err",
+  "        }",
+  "    }",
+  '    addr := flux.Spawn(env, "verify-address", AddressSpec, in)',
+  '    bank := flux.Spawn(env, "verify-bank", BankSpec, in)',
+  "    if err := flux.AwaitAll(addr, bank); err != nil {",
+  "        return err",
+  "    }",
+  '    _, err = flux.SpawnAwait(env, "submit-registry", RegistrySpec, in)',
+  "    return err",
+  "}",
+];
+---
+
+<div class="w w-wide not-prose" data-widget="replay">
+  <span class="w-label">the workflow function · replayed from the top on every change</span>
+  <pre class="rp-code">{CODE.map((l, i) => <div class="rp-line" data-line={i}><i>{i + 1}</i><code>{l}</code><em /></div>)}</pre>
+  <div class="w-fig">
+  <table class="w-left">
+    <thead><tr><th>task (snapshot)</th><th>status</th><th>depends on</th><th>act as a worker / ops</th></tr></thead>
+    <tbody data-out="snap"></tbody>
+  </table>
+  </div>
+  <div class="w-btns">
+    <button class="w-btn" data-act="start">Start workflow</button>
+    <button class="w-btn ghost" data-act="reset">Reset</button>
+  </div>
+  <div class="w-readout">
+    <div class="w-cell"><span>ticks (full re-runs)</span><b class="w-fwd" data-out="ticks">0</b></div>
+    <div class="w-cell"><span>lines run this tick</span><b data-out="lines">0</b></div>
+    <div class="w-cell"><span>tasks created this tick</span><b data-out="created">0</b></div>
+    <div class="w-cell"><span>workflow</span><b class="w-grad" data-out="status">not started</b></div>
+  </div>
+  <p class="w-explain" data-out="msg">Press <b>Start workflow</b>. The engine calls <code>openAccount</code> with an empty snapshot.</p>
+  <div class="w-log" data-out="log"></div>
+</div>
+
+<style is:global>
+  .w .rp-code { margin: 0; padding: 0.6rem 0; overflow-x: auto; font: 0.78rem/1.55 var(--font-mono); background: rgb(0 0 0 / 0.35); border-radius: 0.5rem; }
+  .w .rp-line { display: flex; gap: 0.75rem; padding: 0 0.75rem; white-space: pre; color: var(--color-dim); opacity: 0.55; transition: background 0.15s, opacity 0.15s; }
+  .w .rp-line i { font-style: normal; width: 1.5rem; text-align: right; flex: none; opacity: 0.6; }
+  .w .rp-line code { font: inherit; color: inherit; background: none; padding: 0; }
+  .w .rp-line em { font-style: normal; color: var(--fwd); }
+  .w .rp-line.ran { opacity: 1; color: var(--color-fg); }
+  .w .rp-line.now { background: var(--fwd-soft); opacity: 1; color: var(--color-fg); }
+  .w .rp-line.stop { background: var(--grad-soft); opacity: 1; color: var(--color-fg); }
+  .w .rp-line.stop em { color: var(--grad); }
+  .w .rp-st-pending { color: var(--color-dim); }
+  .w .rp-st-done { color: var(--ok); }
+  .w .rp-st-failed { color: var(--grad); }
+  .w td .w-btns { gap: 0.3rem; }
+  .w td .w-btn { font-size: 0.72rem; padding: 0.25rem 0.55rem; }
+</style>
+
+<script>
+  import { $, mountAll, reduceMotion } from "../widget/widget";
+
+  type Status = "pending" | "done" | "failed";
+  type Task = { status: Status; match?: boolean; deps: string[] };
+  type Mark = { line: number; note: string; stop?: boolean };
+
+  const SUSPEND = Symbol("suspendNow");
+  const STEP_MS = 260;
+
+  mountAll("replay", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const lines = [...root.querySelectorAll<HTMLElement>(".rp-line")];
+    let snap = new Map<string, Task>(), order: string[] = [], ticks = 0, status = "not started", busy = false;
+
+    // A JS twin of openAccount. Await throws SUSPEND exactly where the Go version panics.
+    const run = () => {
+      const marks: Mark[] = [], created: string[] = [];
+      let frontier: string[] = [];
+      const spawn = (line: number, name: string) => {
+        if (snap.has(name)) {
+          marks.push({ line, note: `found ${name} (${snap.get(name)!.status})` });
+        } else {
+          snap.set(name, { status: "pending", deps: [...frontier] });
+          order.push(name);
+          created.push(name);
+          marks.push({ line, note: `${name} not found → create it` });
+        }
+        return name;
+      };
+      const wait = (line: number, name: string) => {
+        const t = snap.get(name)!;
+        if (t.status === "pending") {
+          marks.push({ line, note: `${name} is pending → panic(suspendNow{})`, stop: true });
+          throw SUSPEND;
+        }
+        return t;
+      };
+      const awaitOne = (line: number, name: string) => {
+        spawn(line, name);
+        const t = wait(line, name);
+        frontier = [name];
+        marks.push({ line, note: `${name} is ${t.status} → return its stored result` });
+        return t;
+      };
+      const ret = (line: number, s: string) => { marks.push({ line, note: `return → workflow ${s}` }); return s; };
+
+      let result: string;
+      try {
+        result = (() => {
+          const id = awaitOne(1, "verify-identity");
+          marks.push({ line: 2, note: `err != nil is ${id.status === "failed"}` });
+          if (id.status === "failed") return ret(3, "failed");
+          marks.push({ line: 5, note: `!id.Match is ${!id.match}` });
+          if (!id.match) {
+            const r = awaitOne(6, "manual-review");
+            marks.push({ line: 7, note: `err != nil is ${r.status === "failed"}` });
+            if (r.status === "failed") return ret(8, "failed");
+          }
+          spawn(11, "verify-address");
+          spawn(12, "verify-bank");
+          for (const n of ["verify-address", "verify-bank"]) wait(13, n);
+          frontier = ["verify-address", "verify-bank"];
+          const failed = ["verify-address", "verify-bank"].some((n) => snap.get(n)!.status === "failed");
+          marks.push({ line: 13, note: `both terminal, err != nil is ${failed}` });
+          if (failed) return ret(14, "failed");
+          const reg = awaitOne(16, "submit-registry");
+          return ret(17, reg.status === "failed" ? "failed" : "completed");
+        })();
+      } catch (e) {
+        if (e !== SUSPEND) throw e;
+        result = "suspended";
+      }
+      return { marks, created, result };
+    };
+
+    const dependents = (name: string): string[] => {
+      const hit = new Set([name]);
+      for (const n of order) if (snap.get(n)!.deps.some((d) => hit.has(d))) hit.add(n);
+      return order.filter((n) => hit.has(n));
+    };
+
+    const button = (label: string, fn: () => void) => {
+      const b = document.createElement("button");
+      b.className = "w-btn ghost";
+      b.textContent = label;
+      b.disabled = busy;
+      b.addEventListener("click", fn);
+      return b;
+    };
+
+    const renderSnap = () => {
+      const body = out("snap");
+      body.replaceChildren();
+      if (!order.length) {
+        body.innerHTML = `<tr><td colspan="4">empty</td></tr>`;
+        return;
+      }
+      for (const name of order) {
+        const t = snap.get(name)!;
+        const tr = document.createElement("tr");
+        const st = t.status === "done" && name === "verify-identity" ? `done (match: ${t.match})` : t.status;
+        tr.innerHTML = `<td>${name}</td><td class="rp-st-${t.status}">${st}</td><td>${t.deps.join(", ") || "none"}</td><td><div class="w-btns"></div></td>`;
+        const btns = tr.querySelector(".w-btns")!;
+        if (t.status === "pending" && status === "suspended") {
+          if (name === "verify-identity") {
+            btns.append(button("match", () => finish(name, "done", true)), button("no match", () => finish(name, "done", false)));
+          } else {
+            btns.append(button("done", () => finish(name, "done")));
+          }
+          btns.append(button("fail", () => finish(name, "failed")));
+        } else if (t.status !== "pending" && !busy) {
+          btns.append(button("rewind", () => rewind(name)));
+        }
+        body.append(tr);
+      }
+    };
+
+    const renderStatic = () => {
+      out("ticks").textContent = String(ticks);
+      out("status").textContent = status;
+      $<HTMLButtonElement>(root, `[data-act="start"]`).disabled = busy || ticks > 0;
+      $<HTMLButtonElement>(root, `[data-act="reset"]`).disabled = busy;
+      renderSnap();
+    };
+
+    const tick = async (why: string) => {
+      busy = true;
+      ticks++;
+      const { marks, created, result } = run();
+      status = result;
+      lines.forEach((l) => { l.className = "rp-line"; l.querySelector("em")!.textContent = ""; });
+      lines[0].classList.add("ran");
+      out("lines").textContent = "0";
+      out("created").textContent = "0";
+      root.querySelectorAll<HTMLButtonElement>("button").forEach((b) => (b.disabled = true));
+      const seen = new Set<number>([0]);
+      const log: string[] = [];
+      for (const m of marks) {
+        if (!reduceMotion()) {
+          lines.forEach((l) => l.classList.remove("now"));
+          lines[m.line].classList.add("now");
+          await new Promise((r) => setTimeout(r, STEP_MS));
+        }
+        seen.add(m.line);
+        lines[m.line].classList.add("ran");
+        log.push(`line ${m.line + 1}: ${m.note}`);
+        out("log").innerHTML = log.join("<br>");
+        out("lines").textContent = String(seen.size);
+      }
+      lines.forEach((l) => l.classList.remove("now"));
+      const last = marks[marks.length - 1];
+      if (last.stop) {
+        lines[last.line].classList.add("stop");
+        lines[last.line].querySelector("em")!.textContent = "  ← panic(suspendNow{})";
+      }
+      out("created").textContent = String(created.length);
+      const patch = created.length ? `The patch creates <b>${created.join(", ")}</b>.` : `Nothing new to create.`;
+      out("msg").innerHTML = result === "suspended"
+        ? `${why} Re-ran from line 1 and stopped at line ${last.line + 1}. ${patch} Everything on the stack is thrown away. Finish a task to trigger the next tick.`
+        : `${why} Re-ran from line 1 and returned: the workflow is <b>${result}</b>. Try <b>rewind</b> on a task.`;
+      busy = false;
+      renderStatic();
+    };
+
+    const finish = (name: string, s: Status, match?: boolean) => {
+      const t = snap.get(name)!;
+      t.status = s;
+      t.match = match;
+      tick(`${name} is ${s}.`);
+    };
+
+    const rewind = (name: string) => {
+      const gone = dependents(name);
+      gone.forEach((n) => snap.delete(n));
+      order = order.filter((n) => !gone.includes(n));
+      tick(`Rewound ${name}, which discarded <b>${gone.join(", ")}</b> (it and everything that depended on it).`);
+    };
+
+    const reset = () => {
+      snap = new Map(); order = []; ticks = 0; status = "not started";
+      lines.forEach((l) => { l.className = "rp-line"; l.querySelector("em")!.textContent = ""; });
+      out("lines").textContent = "0";
+      out("created").textContent = "0";
+      out("log").innerHTML = "";
+      out("msg").innerHTML = `Press <b>Start workflow</b>. The engine calls <code>openAccount</code> with an empty snapshot.`;
+      renderStatic();
+    };
+
+    $(root, `[data-act="start"]`).addEventListener("click", () => tick("Workflow started."));
+    $(root, `[data-act="reset"]`).addEventListener("click", () => !busy && reset());
+    reset();
+  });
+</script>

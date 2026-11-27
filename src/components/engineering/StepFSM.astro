@@ -1,0 +1,144 @@
+---
+import "../widget/widget.css";
+
+const ACTS = [
+  ["ok", "worker", "Upload succeeds"],
+  ["timeout", "worker", "Upload times out"],
+  ["maint", "worker", "Vendor in maintenance"],
+  ["poll", "worker", "Vendor: still processing"],
+  ["accept", "webhook", "Vendor accepts"],
+  ["reject", "webhook", "Vendor rejects"],
+  ["fix", "user", "User fixes the data"],
+  ["approve", "ops", "Ops approves anyway"],
+  ["retry", "ops", "Ops retries"],
+  ["rewind", "ops", "Found wrong data: rewind"],
+];
+---
+
+<div class="w not-prose" data-widget="step-fsm">
+  <span class="w-label">one step · submit a record to a vendor</span>
+  <div class="w-fig">
+    <svg viewBox="0 0 640 250" role="img" aria-label="State machine of one workflow step">
+      <defs>
+        <marker id="sf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" style="fill: var(--color-dim)" />
+        </marker>
+      </defs>
+      <path class="edge" data-edge="ok" d="M160,112 L258,112" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="accept" d="M380,112 L478,112" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="reject" d="M320,134 L320,188" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="fix" d="M260,212 Q170,212 150,136" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="approve" d="M380,212 Q520,212 540,136" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="fault" d="M70,134 L70,188" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="retry" d="M110,190 L110,136" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="rewind" d="M540,90 C540,22 100,22 100,88" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="wait" d="M40,102 C2,92 2,132 38,124" marker-end="url(#sf-arrow)" />
+      <path class="edge" data-edge="poll" d="M300,90 C300,56 340,56 340,88" marker-end="url(#sf-arrow)" />
+      <text class="svglabel" x="209" y="104" text-anchor="middle">uploaded</text>
+      <text class="svglabel" x="429" y="104" text-anchor="middle">accepted</text>
+      <text class="svglabel" x="328" y="166">rejected</text>
+      <text class="svglabel" x="180" y="232">resubmit</text>
+      <text class="svglabel" x="470" y="232">approve</text>
+      <text class="svglabel" x="4" y="166">faulted</text>
+      <text class="svglabel" x="320" y="34" text-anchor="middle">rewind</text>
+      <text class="svglabel" x="320" y="52" text-anchor="middle">poll</text>
+      {[
+        ["pending", 40, 90],
+        ["uploaded", 260, 90],
+        ["done", 480, 90],
+        ["rejected", 260, 190],
+        ["faulted", 30, 190],
+      ].map(([name, x, y]) => (
+        <g class="node" data-node={name}>
+          <rect x={x} y={y} width="120" height="44" rx="8" />
+          <text class="name" x={Number(x) + 60} y={Number(y) + 27} text-anchor="middle">{name}</text>
+        </g>
+      ))}
+    </svg>
+  </div>
+  <div class="w-btns">
+    {ACTS.map(([k, who, label]) => (
+      <button class="w-btn ghost sf-act" data-act={k}><span>{who}</span>{label}</button>
+    ))}
+    <button class="w-btn" data-act="reset">Reset</button>
+  </div>
+  <div class="w-readout">
+    <div class="w-cell"><span>stage</span><b class="w-fwd" data-out="stage">pending</b></div>
+    <div class="w-cell"><span>failed attempts (max 3)</span><b class="w-grad" data-out="att">0</b></div>
+    <div class="w-cell"><span>waits that weren't failures</span><b data-out="waits">0</b></div>
+    <div class="w-cell"><span>audit events</span><b data-out="audit">0</b></div>
+  </div>
+  <p class="w-explain" data-out="msg"></p>
+  <div class="w-log" data-out="log"></div>
+</div>
+
+<style is:global>
+  .w .sf-act { font-size: 0.78rem; padding: 0.4rem 0.7rem; }
+  .w .sf-act span { display: block; font: 600 0.62rem var(--font-mono); color: var(--color-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+  .w .node.cur rect { stroke: var(--fwd); stroke-width: 3; fill: var(--fwd-soft); }
+</style>
+
+<script>
+  import { $, mountAll } from "../widget/widget";
+
+  type Stage = "pending" | "uploaded" | "done" | "rejected" | "faulted";
+  type Step = { to: Stage; edge: string; msg: string; fail?: boolean; wait?: boolean };
+
+  const MAX = 3;
+  const START = `The step starts in <b>pending</b>. A worker will pick it up and upload the record. Click what happens next.`;
+
+  mountAll("step-fsm", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    let stage: Stage = "pending", att = 0, waits = 0, audit: string[] = [];
+
+    const ACTIONS: Record<string, (s: Stage) => Step | null> = {
+      ok: (s) => s === "pending" ? { to: "uploaded", edge: "ok", msg: `Upload went through. The vendor gives us a reference and now we wait for it to process the record.` } : null,
+      timeout: (s) => {
+        if (s !== "pending") return null;
+        if (att + 1 >= MAX) return { to: "faulted", edge: "fault", fail: true, msg: `Third failure. Retrying forever won't help, so the step parks in <b>faulted</b> and waits for a human. The rest of the flow is untouched.` };
+        return { to: "pending", edge: "wait", fail: true, msg: `Timed out. Did the upload land or not? We retry with backoff using the same idempotency key, so the vendor can tell if it already has it.` };
+      },
+      maint: (s) => s === "pending" ? { to: "pending", edge: "wait", wait: true, msg: `Vendor is down for its maintenance window. Try again when it ends. This is <b>not a failure</b>, so the attempt count doesn't move.` } : null,
+      poll: (s) => s === "uploaded" ? { to: "uploaded", edge: "poll", wait: true, msg: `Still processing. Check again in a few minutes. This can go on for hours.` } : null,
+      accept: (s) => s === "uploaded" ? { to: "done", edge: "accept", msg: `The vendor's webhook says accepted. The step is done and the flow can move on.` } : null,
+      reject: (s) => s === "uploaded" ? { to: "rejected", edge: "reject", msg: `Rejected: a field doesn't match the vendor's data. A retry won't fix this. Now we wait for the user or for ops, maybe for days.` } : null,
+      fix: (s) => s === "rejected" ? { to: "pending", edge: "fix", msg: `The user fixed the data from the app. Back to <b>pending</b> to upload again.` } : null,
+      approve: (s) => s === "rejected" ? { to: "done", edge: "approve", msg: `Ops looked at the mismatch and approved it. This needs to be on record: who approved it, and when.` } : null,
+      retry: (s) => s === "faulted" ? { to: "pending", edge: "retry", msg: `Ops fixed whatever was wrong and retried. Attempts start over.` } : null,
+      rewind: (s) => s === "done" ? { to: "pending", edge: "rewind", msg: `Weeks later, someone finds the submitted data was wrong. Redo this step, <b>and every step after it that used its result</b>.` } : null,
+    };
+
+    const WHO: Record<string, string> = Object.fromEntries(
+      [...root.querySelectorAll<HTMLButtonElement>(".sf-act")].map((b) => [b.dataset.act!, b.querySelector("span")!.textContent!]),
+    );
+
+    const render = (msg: string, edge?: string) => {
+      root.querySelectorAll(".node").forEach((n) => n.classList.toggle("cur", (n as HTMLElement).dataset.node === stage));
+      root.querySelectorAll<SVGPathElement>(".edge").forEach((e) => e.classList.toggle("active", e.dataset.edge === edge));
+      root.querySelectorAll<HTMLButtonElement>(".sf-act").forEach((b) => (b.disabled = !ACTIONS[b.dataset.act!](stage)));
+      out("stage").textContent = stage;
+      out("att").textContent = String(att);
+      out("waits").textContent = String(waits);
+      out("audit").textContent = String(audit.length);
+      out("msg").innerHTML = msg;
+      out("log").innerHTML = audit.slice(-4).reverse().join("<br>");
+    };
+
+    const act = (k: string) => {
+      const step = ACTIONS[k](stage);
+      if (!step) return;
+      if (step.fail) att++;
+      if (step.wait) waits++;
+      if (k === "retry" || k === "rewind" || k === "fix") att = 0;
+      audit.push(`${WHO[k]}: ${stage} → ${step.to} (${k})`);
+      stage = step.to;
+      render(step.msg, step.edge);
+    };
+
+    const reset = () => { stage = "pending"; att = 0; waits = 0; audit = []; render(START); };
+
+    root.querySelectorAll<HTMLButtonElement>(".sf-act").forEach((b) => b.addEventListener("click", () => act(b.dataset.act!)));
+    $(root, `[data-act="reset"]`).addEventListener("click", reset);
+    reset();
+  });
+</script>

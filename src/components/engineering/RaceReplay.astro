@@ -1,0 +1,121 @@
+---
+import "../widget/widget.css";
+
+const CODE = `review := flux.Spawn(env, "compliance-review", ReviewSpec, in) // index 0
+sla := flux.Timer(env, "review-sla", 48*time.Hour)            // index 1
+if flux.Race(review, sla) == 1 {
+    return escalate(env, in)
+}
+_, err := flux.Await[ReviewResult](review)
+return err`;
+---
+
+<div class="w not-prose" data-widget="race-replay">
+  <span class="w-label">Race(review, sla) · then replay it</span>
+  <pre class="rr-code"><code>{CODE}</code></pre>
+  <div class="w-controls">
+    <div class="w-btns">
+      <button class="w-btn" data-act="bug" aria-pressed="true">Losers cancelled at the winner's time</button>
+      <button class="w-btn" data-act="fix" aria-pressed="false">... plus cancelSkew (1ms)</button>
+    </div>
+  </div>
+  <div class="w-fig">
+  <table class="w-left">
+    <thead><tr><th>index</th><th>task</th><th>status</th><th>finished_at</th></tr></thead>
+    <tbody data-out="rows"></tbody>
+  </table>
+  </div>
+  <div class="w-btns">
+    <button class="w-btn ghost" data-act="w0">Review finishes first</button>
+    <button class="w-btn ghost" data-act="w1">SLA timer fires first</button>
+    <button class="w-btn ghost" data-act="replay">Replay</button>
+    <button class="w-btn ghost" data-act="reset">Reset</button>
+  </div>
+  <div class="w-readout">
+    <div class="w-cell"><span>Race picked (live tick)</span><b class="w-fwd" data-out="live">-</b></div>
+    <div class="w-cell"><span>Select picks (replay)</span><b class="w-grad" data-out="again">-</b></div>
+  </div>
+  <p class="w-explain" data-out="msg"></p>
+</div>
+
+<style is:global>
+  .w .rr-code { margin: 0; padding: 0.6rem 0.75rem; overflow-x: auto; font: 0.78rem/1.55 var(--font-mono); background: rgb(0 0 0 / 0.35); border-radius: 0.5rem; }
+  .w .rr-code code { font: inherit; background: none; padding: 0; }
+  .w .rr-bad { color: var(--grad); }
+  .w .rr-good { color: var(--ok); }
+</style>
+
+<script>
+  import { $, mountAll } from "../widget/widget";
+
+  type Rec = { name: string; status: "pending" | "done" | "cancelled"; at: number | null };
+
+  const NAMES = ["compliance-review", "review-sla"];
+  const T0 = Date.UTC(2026, 10, 28, 14, 0, 0) * 1000;
+  const SKEW_US = 1000;
+  const START = `Both tasks are pending. Pick which one finishes first.`;
+
+  mountAll("race-replay", (root) => {
+    const out = (k: string) => $(root, `[data-out="${k}"]`);
+    const btn = (k: string) => $<HTMLButtonElement>(root, `[data-act="${k}"]`);
+    let skew = false, recs: Rec[] = [], live: number | null = null, again: number | null = null;
+
+    const ts = (us: number | null) => {
+      if (us === null) return "";
+      const d = new Date(Math.floor(us / 1000)).toISOString().slice(11, 19);
+      return `${d}.${String(us % 1_000_000).padStart(6, "0")}`;
+    };
+
+    // flux's Select: terminal candidates, earliest finished_at first, then lowest index.
+    const select = () => recs
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.status !== "pending")
+      .sort((a, b) => a.r.at! - b.r.at! || a.i - b.i)[0].i;
+
+    const render = (msg: string) => {
+      out("rows").innerHTML = recs.map((r, i) => `<tr><td>${i}</td><td>${r.name}</td><td>${r.status}</td><td>${ts(r.at)}</td></tr>`).join("");
+      out("live").textContent = live === null ? "-" : `${live} (${NAMES[live]})`;
+      const a = out("again");
+      a.textContent = again === null ? "-" : `${again} (${NAMES[again]})`;
+      a.className = again === null ? "w-grad" : again === live ? "rr-good" : "rr-bad";
+      btn("w0").disabled = btn("w1").disabled = live !== null;
+      btn("replay").disabled = live === null;
+      btn("bug").setAttribute("aria-pressed", String(!skew));
+      btn("fix").setAttribute("aria-pressed", String(skew));
+      out("msg").innerHTML = msg;
+    };
+
+    const finish = (w: number) => {
+      recs[w] = { ...recs[w], status: "done", at: T0 };
+      live = select();
+      const at = recs[live].at! + (skew ? SKEW_US : 0);
+      recs = recs.map((r, i) => (i === live ? r : { ...r, status: "cancelled", at }));
+      again = null;
+      render(`Only <b>${NAMES[live]}</b> is terminal, so Race returns ${live} and cancels the other one with finished_at = ${ts(at)}. Nothing records "${live} won". Now press <b>Replay</b>.`);
+    };
+
+    const replay = () => {
+      again = select();
+      const tie = recs[0].at === recs[1].at;
+      render(again === live
+        ? tie
+          ? `Both are terminal with the same finished_at, so the index breaks the tie and picks 0. That happens to be the winner, so the bug stays hidden. Try the SLA firing first.`
+          : `Both are terminal now. The winner's finished_at is earlier, so Select picks ${again} again and the workflow stays on the same branch.`
+        : `Both are terminal with the <b>same finished_at</b>. The tie goes to the lower index, so Select now says the review won. The workflow has switched branches mid-flight: it skips the escalation, and the <code>Await</code> on the review returns a <b>cancelled</b> error.`);
+    };
+
+    const reset = () => {
+      recs = NAMES.map((name) => ({ name, status: "pending", at: null }));
+      live = again = null;
+      render(START);
+    };
+
+    btn("w0").addEventListener("click", () => finish(0));
+    btn("w1").addEventListener("click", () => finish(1));
+    btn("replay").addEventListener("click", replay);
+    btn("reset").addEventListener("click", reset);
+    btn("bug").addEventListener("click", () => { skew = false; reset(); });
+    btn("fix").addEventListener("click", () => { skew = true; reset(); });
+    reset();
+  });
+</script>

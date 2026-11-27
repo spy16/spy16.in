@@ -1,0 +1,279 @@
+---
+title: "Workflows as plain Go functions"
+pubDate: 2026-11-28
+publish: true
+description: |
+  Long-running workflows with 20+ steps that fail in every possible way, and how I ended up writing them as plain Go functions that pause with a panic.
+tags: [golang, workflows, concurrency, distributed_system]
+---
+
+import StepFSM from "../../../components/engineering/StepFSM.astro";
+import Replay from "../../../components/engineering/Replay.astro";
+import RaceReplay from "../../../components/engineering/RaceReplay.astro";
+
+At work, I was building flows that take days, sometimes weeks, to finish. These are ops-heavy and compliance-heavy flows where a single request goes through 20+ steps before it is done: verifying documents, uploading records to vendors and registries, waiting for someone from ops to review something, etc. I ended up building a workflow engine called **flux** for them.
+
+In this article, I will go through what makes these workflows hard, what I wanted the code for them to look like, and how I got Go to do that using `panic`.
+
+## Problem
+
+### One step
+
+Let's take just one of those steps: submit a customer's record to an external registry. On a good day, it's one API call. But here is what can happen to it over its lifetime:
+
+1. We upload the record and the request times out. Did the upload land or not?
+2. It did land. The registry says "processing", and keeps saying that for hours.
+3. Then it rejects the record because some field doesn't match its own data. Retrying won't fix this. The user has to fix the data, or someone from ops has to approve the mismatch.
+4. The user fixes it days later. But now the registry is down for its maintenance window, so we have to wait till it is back. And this wait shouldn't count as a failure.
+5. It finally goes through. Weeks later, someone finds that the data we submitted was wrong. Now we have to redo this step, and every step after it that used its result.
+
+So even one step is a full state machine. Try it: push the step through a timeout, a maintenance window and a rejection, then rewind it after it's done.
+
+<StepFSM />
+
+The flows I worked on had 20+ steps like this, each one a big state machine of its own. Now multiply that by every customer who is somewhere in the middle of a flow, and by every deploy that happens while all of them are waiting. And since these are compliance-heavy flows, every transition and every manual override needs a record of who did what, and when.
+
+### A table per step
+
+The obvious way to build this is a table per step, with its own schema:
+
+```sql
+CREATE TABLE registry_submissions (
+    customer_id     BIGINT PRIMARY KEY,
+    status          TEXT NOT NULL,  -- pending, uploaded, rejected, done
+    vendor_ref      TEXT,
+    attempts        INT  NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ,
+    locked_until    TIMESTAMPTZ,
+    last_error      TEXT,
+    updated_at      TIMESTAMPTZ NOT NULL
+);
+```
+
+Plus a background job that picks the rows whose `next_attempt_at` has passed and that nobody holds a lock on. For one or two steps, this is honestly the right answer. It's simple, and you can see everything with a SQL query.
+
+But at 20 steps, it starts falling apart:
+
+1. Only the `status` values and `vendor_ref` are specific to this step. `attempts`, `next_attempt_at`, `locked_until` and `last_error` are machinery, and the machinery gets copied into every table. Every copy is one more chance to get the backoff or the lock wrong.
+2. The flow itself doesn't exist anywhere. "When the registry submission is done, create the bank verification row" lives inside the success path of the previous step. To find out what happens after step 7, you grep.
+3. Rewind is an incident. Which rows in which tables came from the bad one? Nothing records that, so someone has to work it out and write SQL by hand.
+4. Every table needs its own admin screen and its own audit trail. Ops can only do what someone built a button for, so they end up asking engineers to run `UPDATE` statements. Which is exactly what compliance doesn't want.
+
+In flux, every step is a row in one `tasks` table instead. A row has a kind, a stage, the step's own data as JSON, a status, an attempt count, the next time it should run, a revision, and the tasks it depends on. Each kind of step registers its state machine:
+
+```go
+task.BindFSM(mgr, SubmitSpec, task.FSM[SubmitData, SubmitResult]{
+	"pending":          {task.ActionSync: upload},
+	"pending.uploaded": {task.ActionSync: pollStatus, "callback": onCallback},
+	"pending.rejected": {"resubmit": upload, "approve": approve},
+})
+```
+
+Retries with backoff, locking (every write checks the revision), the audit events and the admin API are written once, and every step gets them. That takes care of problems 1 and 4. But where does the order of the steps live?
+
+## What I wanted
+
+It would be ideal if the whole flow could be written as one plain Go function. Something like this:
+
+```go
+func openAccount(env flux.Env, in Input) error {
+	id, err := flux.SpawnAwait(env, "verify-identity", IdentitySpec, in) // may take days
+	if err != nil {
+		return err
+	}
+	if !id.Match {
+		if _, err := flux.SpawnAwait(env, "manual-review", ReviewSpec, in); err != nil {
+			return err
+		}
+	}
+
+	// remind the user every day until they upload the document, give up after a week
+	doc := flux.Spawn(env, "collect-document", DocumentSpec, in)
+	for day := 1; ; day++ {
+		wait := flux.Timer(env, fmt.Sprintf("reminder-%d", day), 24*time.Hour)
+		if flux.Select(doc, wait) == 0 {
+			break
+		}
+		flux.Emit(env, fmt.Sprintf("remind-user-%d", day), in)
+		if day == 7 {
+			return flux.Fail("expired", "no document after a week")
+		}
+	}
+
+	// these two run in parallel
+	addr := flux.Spawn(env, "verify-address", AddressSpec, in)
+	bank := flux.Spawn(env, "verify-bank", BankSpec, in)
+	if err := flux.AwaitAll(addr, bank); err != nil {
+		return err
+	}
+
+	// compliance has 48 hours to review, or it gets escalated
+	review := flux.Spawn(env, "compliance-review", ReviewSpec, in)
+	sla := flux.Timer(env, "review-sla", 48*time.Hour)
+	if flux.Race(review, sla) == 1 {
+		return escalate(env, in)
+	}
+
+	_, err = flux.SpawnAwait(env, "submit-registry", RegistrySpec, in)
+	return err
+}
+```
+
+To give you a summary:
+
+1. A branch is a normal `if`. If the identity doesn't match, a person reviews it.
+2. The daily reminder is a normal `for` loop, with a `Select` between the upload and that day's timer.
+3. Two steps in parallel are two `Spawn`s and an `AwaitAll`.
+4. A deadline is a timer racing the task.
+
+You can read the whole flow top to bottom. When someone from ops asks "what happens after the review?", the answer is right there. And all the messy failure handling from the previous section stays inside each step's state machine, where it belongs.
+
+But every one of those awaits can take days. How do you run a function like this? What if the process crashes while it is waiting? What about a deploy? A goroutine blocked on a channel lives in one process's memory. **Go has no way to pause a function, save it somewhere, and resume it on another machine later.**
+
+If you have used Temporal, you know it gives you this exact programming model. Its Go SDK runs workflow code as coroutines on goroutines, with its own deterministic dispatcher [^1], and keeps them alive in a cache on the worker [^2]. When the cache misses, it rebuilds the state by replaying the history. Flux does the simpler version of this: it never resumes a function. It just runs it again.
+
+## Run it again from the top
+
+Every time something changes (a task finished, a timer fired, ops rewound something), the engine loads a snapshot of the workflow, which is its input plus every task it has created so far, and calls the Go function again from the first line.
+
+Every flux call is a lookup **by task name** in that snapshot:
+
+```
+tick 1:  Spawn("verify-identity")   not in snapshot → create it
+         Await                      pending → stop here
+
+         ... days pass, a worker finishes the task ...
+
+tick 2:  Spawn("verify-identity")   found, done → return the handle
+         Await                      done → return its stored output
+         if !id.Match               a normal Go if, on the stored output
+         Spawn("manual-review")     not in snapshot → create it
+         Await                      pending → stop here
+```
+
+The code before the stopping point runs again, but everything it asks for is already in the snapshot. So it just gets the stored results and walks forward. The function only does real work at its frontier: the first call whose answer isn't known yet.
+
+Try it: start the workflow and finish the tasks one by one. Every tick runs the function from line 1. Once a few tasks are done, rewind one of them.
+
+<Replay />
+
+Rewind falls out of this for free. When a task is spawned, flux records the tasks it depends on (by default, whatever was awaited before it). Rewinding a task discards it and everything that depended on it. On the next replay, the function doesn't find those tasks by name, so it creates them again. Problem 3 from the table-per-step list is now one API call, with a `dry_run` to see what it would discard first.
+
+## Stopping with panic
+
+The one hard question left is: how do you stop at that `Await`?
+
+The function could be anywhere when it hits a pending task: three helpers deep, inside a loop, etc. We need to get out of all of it and back to the engine, right now. Go has exactly one thing that can unwind an arbitrary stack: `panic`.
+
+This is the core of `Await` (trimmed):
+
+```go
+func (f *futureImpl) wait() error {
+	if f.record.IsTerminal() && !f.record.FinishedAt.IsZero() {
+		f.env.advanceClock(f.record.FinishedAt)
+	}
+	switch f.record.Status {
+	case task.StatusDone:
+		updateFrontier()
+		return nil
+	case task.StatusFailed:
+		updateFrontier()
+		return &fluxerr.Error{Code: f.record.Error.Code, Message: f.record.Error.Message}
+	case task.StatusCancelled:
+		updateFrontier()
+		return &fluxerr.Error{Code: "cancelled", Message: "task was cancelled"}
+	default:
+		panic(suspendNow{}) // not ready yet: unwind back to the engine
+	}
+}
+```
+
+And this is the engine side that catches it:
+
+```go
+func (d *replayDriver[I]) safeInvoke(ctx context.Context, env Env, input I) (effects Patch, faulted bool, err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			if _, ok := v.(suspendNow); ok {
+				effects = *env.patch() // everything this run decided before it stopped
+				return
+			}
+			// any other panic is a bug: fault the workflow, keep the stack
+		}
+	}()
+	deciderErr := d.fn(env, input)
+	// nil → completed, flux.Fail(...) → failed, any other error → faulted
+}
+```
+
+When `recover` stops a panic, "the state of functions called between G and the call to panic is discarded" [^3]. That is the whole trick! The stack gets thrown away, and nothing on it needed to survive, because the only thing a run produces is the **patch**: tasks to create, tasks to cancel, events to emit. The engine writes that patch in one transaction, guarded by the workflow's revision, so two engines can't both apply the same tick.
+
+This also gives us the rules for writing workflow code:
+
+1. Never `recover()` inside a workflow function. It would swallow the suspension.
+2. No goroutines. `recover` only catches a panic "on the same goroutine" [^3], so a suspension inside a goroutine you started would crash the whole process.
+3. A `defer` in workflow code runs on every suspension, i.e., many times.
+4. The usual determinism rules: no `time.Now()`, no random numbers, no I/O. Use `env.Clock()` and tasks.
+
+## Loops and branches
+
+Since a replay is just running Go, branches and loops are plain Go. The only catch is that **task names are the program counter**. A name must be the same on every replay, and unique in each loop iteration. So you build them from loop variables (`reminder-1`, `reminder-2`, ...), never from time or randomness.
+
+Take the reminder loop from earlier. On day 4, the replay goes through days 1 to 3 without waiting at all, because those timers are already done in the snapshot, and stops at day 4's timer.
+
+Timers are just tasks too. `flux.Timer` creates a built-in task whose `execute_at` is `env.Clock() + d`, and a worker completes it when it is due. To the workflow, a timer, a user's upload and a vendor call are the same thing: a task that will be terminal some day. That's why `Select(doc, wait)` needs no special case.
+
+`env.Clock()` is a logical clock. It starts at the workflow's creation time and moves forward only when `Await` or `Select` sees a finished task, to that task's `finished_at`. So every replay sees the same clock values, and each reminder's timer is 24 hours after the previous one finished, no matter when the replay actually runs.
+
+`flux.Emit` checks the event name against the events the workflow has already emitted and skips it if it's there. So each day's reminder goes out once, no matter how many times the loop replays.
+
+## Select and Race
+
+`Spawn` never suspends. It finds the task by name or adds a "create" to the patch, and returns a future. So two `Spawn`s followed by an `AwaitAll` create both tasks in the same tick, and workers run them in parallel. Parallelism without a single goroutine. Nice!
+
+`AwaitAll` just waits on each future in turn. The first one that isn't done panics, so it's a barrier.
+
+`Select` returns the index of the first future to finish. In flux, it's a pure function of the snapshot:
+
+```go
+for i, f := range futures {
+	if rec := f.getTask(); rec.IsTerminal() {
+		candidates = append(candidates, candidate{i, rec})
+	}
+}
+if len(candidates) == 0 {
+	panic(suspendNow{})
+}
+// sort: earliest FinishedAt first, then lowest index
+```
+
+Nothing records "the winner was 1". Every replay works it out again from the timestamps. This also means `Select` must give the same answer on every replay, forever, from whatever was written to the database.
+
+`Race` is `Select` plus cancelling the losers. The first version of `Race` stamped each cancelled loser with the winner's exact `finished_at`. On the next replay, both tasks were terminal at the same instant, the timestamps tied, the index broke the tie, and the workflow silently switched branches. It only showed up when the winner wasn't at index 0.
+
+Try it with the SLA timer firing first, then press Replay. Then switch on `cancelSkew` and do it again.
+
+<RaceReplay />
+
+The fix is a constant:
+
+```go
+const cancelSkew = time.Millisecond
+```
+
+Losers are now cancelled 1ms after the winner finished. Postgres stores timestamps with 1 microsecond resolution [^4], so even a microsecond would survive the round trip, and 1ms gives some margin. `Cancel` does the same thing with the latest completion the workflow has seen. In a replayed workflow, **every timestamp you write becomes an input to a decision you will make again**.
+
+## Final Thoughts
+
+There is definitely room for improvement here. For example:
+
+1. Replays get longer as a flow grows, and finding a task by name is a linear scan of the snapshot. That's fine for flows with tens of steps, but it is quadratic.
+2. Renaming a task in code means in-flight workflows can't find it anymore, and will create a new one.
+3. If the code for a branch changes while workflows are in the middle of it, the old branch's tasks don't cause an error. They just stay in the snapshot, orphaned.
+
+So the core of the engine is a lookup by name, a `panic` and a `recover`. Everything else is bookkeeping, and making sure the bookkeeping says the same thing every time you ask.
+
+[^1]: Temporal Go SDK v1.33.0, `internal/internal_workflow.go`: `coroutineState` with `aboutToBlock` and `unblock` channels, and a `dispatcher` that "executes coroutines one by one in deterministic order".
+[^2]: Temporal Go SDK v1.33.0, `internal/internal_task_pollers.go`: the sticky workflow cache (`stickyCacheSize`).
+[^3]: The Go Programming Language Specification, [Handling panics](https://go.dev/ref/spec#Handling_panics).
+[^4]: PostgreSQL docs, [Date/Time Types](https://www.postgresql.org/docs/current/datatype-datetime.html): `timestamp` has 1 microsecond resolution.
